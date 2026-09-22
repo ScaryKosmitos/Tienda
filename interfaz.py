@@ -1,6 +1,25 @@
+import sqlite3
+from functools import wraps
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import base_datos as db
+
+
+def manejar_errores_bd(func):
+    """Evita que un error inesperado de la base de datos (archivo bloqueado,
+    permisos, etc.) cierre la aplicación sin explicación: muestra un aviso
+    claro en su lugar."""
+    @wraps(func)
+    def envoltorio(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except (sqlite3.Error, OSError) as error:
+            messagebox.showerror(
+                "Error de Base de Datos",
+                f"Ocurrió un problema al acceder a la base de datos:\n{error}"
+            )
+    return envoltorio
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -11,8 +30,8 @@ class AplicacionInventario(ctk.CTk):
         super().__init__()
 
         self.title("Sistema CRUD y Gestión de Inventario")
-        self.geometry("1000x700")
-        self.minsize(1500, 800)
+        self.geometry("1100x650")
+        self.minsize(900, 600)
 
         # Variables internas de selección
         self.id_producto_seleccionado = None
@@ -177,6 +196,7 @@ class AplicacionInventario(ctk.CTk):
         self.tabla.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
 
+    @manejar_errores_bd
     def cargar_productos_en_tabla(self, lista_productos=None):
         for item in self.tabla.get_children():
             self.tabla.delete(item)
@@ -227,6 +247,7 @@ class AplicacionInventario(ctk.CTk):
 
         self.btn_guardar.configure(text="Actualizar Producto", fg_color="#2E7D32", hover_color="#1B5E20")
 
+    @manejar_errores_bd
     def guardar_producto(self):
         nombre = self.entry_nombre.get().strip()
         categoria = self.entry_categoria.get().strip()
@@ -245,18 +266,19 @@ class AplicacionInventario(ctk.CTk):
             return
 
         if self.id_producto_seleccionado:
-            db.actualizar_producto(self.id_producto_seleccionado, nombre, categoria, precio, stock)
-            messagebox.showinfo("Éxito", f"Producto '{nombre}' actualizado.")
+            exito, mensaje = db.actualizar_producto(self.id_producto_seleccionado, nombre, categoria, precio, stock)
         else:
             exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock)
-            if not exito:
-                messagebox.showerror("Dato Inválido", mensaje)
-                return
-            messagebox.showinfo("Éxito", f"Producto '{nombre}' registrado.")
 
+        if not exito:
+            messagebox.showerror("Dato Inválido", mensaje)
+            return
+
+        messagebox.showinfo("Éxito", mensaje)
         self.limpiar_formulario()
         self.cargar_productos_en_tabla()
 
+    @manejar_errores_bd
     def procesar_venta(self):
         if not self.id_producto_seleccionado:
             messagebox.showwarning("Selección Requerida", "Selecciona un producto de la tabla para vender.")
@@ -290,6 +312,7 @@ class AplicacionInventario(ctk.CTk):
         else:
             messagebox.showerror("Error en Venta", mensaje)
 
+    @manejar_errores_bd
     def abrir_ventana_ventas(self):
         ventana_ventas = ctk.CTkToplevel(self)
         ventana_ventas.title("Historial de Ventas")
@@ -341,6 +364,7 @@ class AplicacionInventario(ctk.CTk):
         )
         lbl_total_acumulado.pack(pady=10)
 
+    @manejar_errores_bd
     def eliminar_producto(self):
         if not self.id_producto_seleccionado:
             messagebox.showwarning("Selección Requerida", "Selecciona un producto de la tabla.")
@@ -354,6 +378,7 @@ class AplicacionInventario(ctk.CTk):
             else:
                 messagebox.showerror("No se pudo eliminar", mensaje)
 
+    @manejar_errores_bd
     def filtrar_productos(self, event):
         texto = self.entry_buscar.get().strip()
         if texto == "":

@@ -1,9 +1,24 @@
+import os
+import sys
 import sqlite3
 from datetime import datetime
 
+def _ruta_db():
+    """
+    Ubica inventario.db junto al ejecutable (o al script), sin importar
+    desde qué carpeta se haya lanzado la aplicación. Esto es necesario
+    para que un .exe empaquetado (PyInstaller) siempre use la misma
+    base de datos en vez de crear una nueva vacía por accidente.
+    """
+    if getattr(sys, "frozen", False):
+        carpeta = os.path.dirname(sys.executable)
+    else:
+        carpeta = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(carpeta, "inventario.db")
+
 def conectar():
     """Establece conexión con la base de datos SQLite y activa las claves foráneas."""
-    conexion = sqlite3.connect("inventario.db")
+    conexion = sqlite3.connect(_ruta_db())
     conexion.execute("PRAGMA foreign_keys = ON")
     return conexion
 
@@ -44,6 +59,8 @@ def inicializar_db():
 
 def agregar_producto(nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str)."""
+    if precio <= 0:
+        return False, "El precio debe ser mayor a 0."
     if stock <= 0:
         return False, "El stock debe ser mayor a 0."
 
@@ -77,6 +94,13 @@ def buscar_producto_por_nombre(texto_busqueda):
         conexion.close()
 
 def actualizar_producto(id_producto, nombre, categoria, precio, stock):
+    """Retorna (exito: bool, mensaje: str). El stock puede quedar en 0 (agotado),
+    pero nunca negativo, y el precio siempre debe ser mayor a 0."""
+    if precio <= 0:
+        return False, "El precio debe ser mayor a 0."
+    if stock < 0:
+        return False, "El stock no puede ser negativo."
+
     conexion = conectar()
     try:
         with conexion:
@@ -85,6 +109,7 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
                 SET nombre = ?, categoria = ?, precio = ?, stock = ?
                 WHERE id = ?
             """, (nombre, categoria, precio, stock, id_producto))
+        return True, "Producto actualizado."
     finally:
         conexion.close()
 
