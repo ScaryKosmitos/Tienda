@@ -248,7 +248,10 @@ class AplicacionInventario(ctk.CTk):
             db.actualizar_producto(self.id_producto_seleccionado, nombre, categoria, precio, stock)
             messagebox.showinfo("Éxito", f"Producto '{nombre}' actualizado.")
         else:
-            db.agregar_producto(nombre, categoria, precio, stock)
+            exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock)
+            if not exito:
+                messagebox.showerror("Dato Inválido", mensaje)
+                return
             messagebox.showinfo("Éxito", f"Producto '{nombre}' registrado.")
 
         self.limpiar_formulario()
@@ -344,9 +347,12 @@ class AplicacionInventario(ctk.CTk):
             return
 
         if messagebox.askyesno("Confirmar", f"¿Estás seguro de eliminar '{self.entry_nombre.get()}'?"):
-            db.eliminar_producto(self.id_producto_seleccionado)
-            self.limpiar_formulario()
-            self.cargar_productos_en_tabla()
+            exito, mensaje = db.eliminar_producto(self.id_producto_seleccionado)
+            if exito:
+                self.limpiar_formulario()
+                self.cargar_productos_en_tabla()
+            else:
+                messagebox.showerror("No se pudo eliminar", mensaje)
 
     def filtrar_productos(self, event):
         texto = self.entry_buscar.get().strip()
