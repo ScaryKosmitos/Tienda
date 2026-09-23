@@ -690,8 +690,14 @@ class AplicacionInventario(ctk.CTk):
         entry_hasta = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
         entry_hasta.pack(side="left", padx=(4, 10))
 
-        frame_tabla = ctk.CTkFrame(ventana_ventas)
-        frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
+        # Dos pestañas que comparten los filtros de fecha
+        pestanas = ctk.CTkTabview(ventana_ventas)
+        pestanas.pack(fill="both", expand=True, padx=15, pady=(4, 10))
+        tab_ventas = pestanas.add("Ventas")
+        tab_ranking = pestanas.add("🏆 Más vendidos")
+
+        frame_tabla = ctk.CTkFrame(tab_ventas)
+        frame_tabla.pack(fill="both", expand=True, pady=(0, 8))
 
         columnas = ("id", "producto", "cantidad", "total", "fecha", "estado")
         tabla_ventas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
@@ -718,12 +724,39 @@ class AplicacionInventario(ctk.CTk):
         scrollbar.pack(side="right", fill="y")
 
         lbl_total_acumulado = ctk.CTkLabel(
-            ventana_ventas, 
+            tab_ventas, 
             text="", 
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color="#2E7D32"
         )
-        lbl_total_acumulado.pack(pady=(0, 10))
+        lbl_total_acumulado.pack(pady=(0, 4))
+
+        # Pestaña de productos más vendidos
+        frame_ranking = ctk.CTkFrame(tab_ranking)
+        frame_ranking.pack(fill="both", expand=True, pady=(0, 8))
+
+        columnas_ranking = ("puesto", "producto", "unidades", "total", "porcentaje")
+        tabla_ranking = ttk.Treeview(frame_ranking, columns=columnas_ranking, show="headings")
+        tabla_ranking.heading("puesto", text="#")
+        tabla_ranking.heading("producto", text="Producto")
+        tabla_ranking.heading("unidades", text="Unidades Vendidas")
+        tabla_ranking.heading("total", text="Total ($)")
+        tabla_ranking.heading("porcentaje", text="% de lo Vendido")
+        # Las columnas de números no se encogen, para que sus títulos no se corten;
+        # si la ventana cambia de tamaño, la que se ajusta es la de Producto
+        tabla_ranking.column("puesto", width=40, minwidth=40, stretch=False, anchor="center")
+        tabla_ranking.column("producto", width=200, minwidth=120)
+        tabla_ranking.column("unidades", width=195, minwidth=195, stretch=False, anchor="center")
+        tabla_ranking.column("total", width=110, minwidth=110, stretch=False, anchor="e")
+        tabla_ranking.column("porcentaje", width=175, minwidth=175, stretch=False, anchor="center")
+
+        scrollbar_ranking = ttk.Scrollbar(frame_ranking, orient="vertical", command=tabla_ranking.yview)
+        tabla_ranking.configure(yscroll=scrollbar_ranking.set)
+        tabla_ranking.pack(side="left", fill="both", expand=True)
+        scrollbar_ranking.pack(side="right", fill="y")
+
+        lbl_resumen_ranking = ctk.CTkLabel(tab_ranking, text="", font=ctk.CTkFont(size=15, weight="bold"))
+        lbl_resumen_ranking.pack(pady=(0, 4))
 
         def poner_fechas(desde, hasta):
             for entry, valor in ((entry_desde, desde), (entry_hasta, hasta)):
@@ -759,11 +792,13 @@ class AplicacionInventario(ctk.CTk):
                 )
                 return
 
-            for item in tabla_ventas.get_children():
-                tabla_ventas.delete(item)
+            for tabla in (tabla_ventas, tabla_ranking):
+                for item in tabla.get_children():
+                    tabla.delete(item)
 
             try:
                 ventas = db.obtener_ventas(desde, hasta)
+                ranking = db.obtener_mas_vendidos(desde, hasta)
             except (sqlite3.Error, OSError) as error:
                 messagebox.showerror(
                     "Error de Base de Datos",
@@ -796,6 +831,21 @@ class AplicacionInventario(ctk.CTk):
             lbl_total_acumulado.configure(
                 text=f"Total Recaudado ({periodo}): {formatear_precio(dinero_total)}  ·  {lineas_validas} líneas de venta"
             )
+
+            total_ranking = sum(total for _, _, total in ranking)
+            for puesto, (nombre_prod, unidades, total) in enumerate(ranking, start=1):
+                porcentaje = f"{total / total_ranking * 100:.1f} %".replace(".", ",") if total_ranking else "—"
+                tabla_ranking.insert(
+                    "", "end",
+                    values=(puesto, nombre_prod, formatear_numero(unidades), formatear_precio(total), porcentaje)
+                )
+            if ranking:
+                lbl_resumen_ranking.configure(
+                    text=f"{len(ranking)} producto(s) vendidos ({periodo})  ·  "
+                         f"Más vendido: {ranking[0][0]} ({formatear_numero(ranking[0][1])} unidades)"
+                )
+            else:
+                lbl_resumen_ranking.configure(text=f"No hay ventas en este período ({periodo}).")
 
         def anular_seleccionadas():
             seleccion = tabla_ventas.selection()
@@ -830,7 +880,7 @@ class AplicacionInventario(ctk.CTk):
                 messagebox.showerror("No se pudo anular", mensaje, parent=ventana_ventas)
 
         ctk.CTkButton(
-            ventana_ventas, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
+            tab_ventas, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#D32F2F", hover_color="#B71C1C", command=anular_seleccionadas
         ).pack(before=lbl_total_acumulado, pady=(0, 8))
 

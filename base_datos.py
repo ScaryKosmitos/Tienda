@@ -316,12 +316,8 @@ def registrar_venta_carrito(items):
         conexion.close()
 
 
-def obtener_ventas(desde=None, hasta=None):
-    """
-    Retorna las ventas ordenadas de más reciente a más antigua, como
-    (id, producto_id, nombre_producto, cantidad, total, fecha, anulada).
-    'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
-    """
+def _filtro_fechas(desde, hasta):
+    """Condiciones SQL y parámetros para filtrar ventas entre dos fechas 'AAAA-MM-DD' (ambas incluidas)."""
     condiciones, parametros = [], []
     if desde:
         condiciones.append("date(fecha) >= ?")
@@ -329,11 +325,49 @@ def obtener_ventas(desde=None, hasta=None):
     if hasta:
         condiciones.append("date(fecha) <= ?")
         parametros.append(hasta)
+    return condiciones, parametros
+
+
+def obtener_ventas(desde=None, hasta=None):
+    """
+    Retorna las ventas ordenadas de más reciente a más antigua, como
+    (id, producto_id, nombre_producto, cantidad, total, fecha, anulada).
+    'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
+    """
+    condiciones, parametros = _filtro_fechas(desde, hasta)
 
     consulta = "SELECT id, producto_id, nombre_producto, cantidad, total, fecha, anulada FROM ventas"
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY id DESC"
+
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(consulta, parametros)
+        return cursor.fetchall()
+    finally:
+        conexion.close()
+
+
+def obtener_mas_vendidos(desde=None, hasta=None):
+    """
+    Ranking de productos por unidades vendidas (sin contar ventas anuladas),
+    como (nombre, unidades, total_recaudado), de más a menos vendido.
+    'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
+    """
+    condiciones, parametros = _filtro_fechas(desde, hasta)
+    condiciones.insert(0, "v.anulada = 0")
+
+    # Se usa el nombre actual del producto, para que una venta hecha antes de
+    # renombrarlo se sume en la misma fila
+    consulta = f"""
+        SELECT COALESCE(p.nombre, MAX(v.nombre_producto)), SUM(v.cantidad), SUM(v.total)
+        FROM ventas v LEFT JOIN productos p ON p.id = v.producto_id
+        WHERE {" AND ".join(condiciones)}
+        GROUP BY v.producto_id
+        ORDER BY SUM(v.cantidad) DESC, SUM(v.total) DESC
+    """
 
     conexion = conectar()
     try:
