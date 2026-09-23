@@ -22,6 +22,9 @@ def manejar_errores_bd(func):
             )
     return envoltorio
 
+# Los productos con menos unidades que esto se marcan en rojo
+STOCK_BAJO = 5
+
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -114,6 +117,16 @@ class AplicacionInventario(ctk.CTk):
         )
         self.btn_ver_ventas.pack(fill="x", padx=15, pady=5)
 
+        self.btn_entradas = ctk.CTkButton(
+            self.frame_formulario, 
+            text="📥 Entrada de Mercancía", 
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#00838F", 
+            hover_color="#005662",
+            command=self.abrir_ventana_entradas
+        )
+        self.btn_entradas.pack(fill="x", padx=15, pady=5)
+
         self.btn_limpiar = ctk.CTkButton(
             self.frame_formulario, 
             text="Limpiar Campos", 
@@ -158,6 +171,18 @@ class AplicacionInventario(ctk.CTk):
         self.entry_buscar.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.entry_buscar.bind("<KeyRelease>", self.filtrar_productos)
 
+        self.menu_categoria = ctk.CTkOptionMenu(
+            self.frame_busqueda, values=["Todas"], width=150, font=ctk.CTkFont(size=13),
+            command=self.filtrar_productos
+        )
+        self.menu_categoria.pack(side="left", padx=5)
+
+        self.check_stock_bajo = ctk.CTkCheckBox(
+            self.frame_busqueda, text="Solo stock bajo", font=ctk.CTkFont(size=13),
+            command=self.filtrar_productos
+        )
+        self.check_stock_bajo.pack(side="left", padx=(5, 0))
+
         self.tabla_frame = ctk.CTkFrame(self.frame_derecho)
         self.tabla_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self.tabla_frame.grid_rowconfigure(0, weight=1)
@@ -193,7 +218,7 @@ class AplicacionInventario(ctk.CTk):
         self.tabla.column("precio", width=100, anchor="e")
         self.tabla.column("stock", width=80, anchor="center")
 
-        # Alerta visual en rojo para productos con stock < 5
+        # Alerta visual en rojo para productos con stock bajo
         self.tabla.tag_configure("stock_bajo", foreground="#FF3333")
         self.tabla.bind("<<TreeviewSelect>>", self.cargar_producto_en_formulario)
 
@@ -204,18 +229,32 @@ class AplicacionInventario(ctk.CTk):
         scrollbar.grid(row=0, column=1, sticky="ns")
 
     @manejar_errores_bd
-    def cargar_productos_en_tabla(self, lista_productos=None):
+    def cargar_productos_en_tabla(self):
+        """Recarga la tabla respetando la búsqueda, la categoría y el filtro de stock bajo."""
+        self.actualizar_menu_categorias()
+
+        categoria = self.menu_categoria.get()
+        lista_productos = db.buscar_productos(
+            texto=self.entry_buscar.get().strip(),
+            categoria=None if categoria == "Todas" else categoria,
+            stock_menor_a=STOCK_BAJO if self.check_stock_bajo.get() else None,
+        )
+
         for item in self.tabla.get_children():
             self.tabla.delete(item)
 
-        if lista_productos is None:
-            lista_productos = db.obtener_productos()
-
         for prod in lista_productos:
-            if prod[4] < 5:
+            if prod[4] < STOCK_BAJO:
                 self.tabla.insert("", "end", values=prod, tags=("stock_bajo",))
             else:
                 self.tabla.insert("", "end", values=prod)
+
+    def actualizar_menu_categorias(self):
+        """Mantiene el menú de categorías al día con los productos existentes."""
+        categorias = ["Todas"] + db.obtener_categorias()
+        self.menu_categoria.configure(values=categorias)
+        if self.menu_categoria.get() not in categorias:
+            self.menu_categoria.set("Todas")
 
     def configurar_carrito(self):
         self.frame_carrito = ctk.CTkFrame(self.frame_derecho)
@@ -454,20 +493,23 @@ class AplicacionInventario(ctk.CTk):
         frame_tabla = ctk.CTkFrame(ventana_ventas)
         frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
 
-        columnas = ("id", "producto", "cantidad", "total", "fecha")
+        columnas = ("id", "producto", "cantidad", "total", "fecha", "estado")
         tabla_ventas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
+        tabla_ventas.tag_configure("anulada", foreground="#888888")
 
         tabla_ventas.heading("id", text="ID Venta")
         tabla_ventas.heading("producto", text="Producto")
         tabla_ventas.heading("cantidad", text="Cant.")
         tabla_ventas.heading("total", text="Total ($)")
         tabla_ventas.heading("fecha", text="Fecha y Hora")
+        tabla_ventas.heading("estado", text="Estado")
 
         tabla_ventas.column("id", width=60, anchor="center")
         tabla_ventas.column("producto", width=180)
         tabla_ventas.column("cantidad", width=60, anchor="center")
         tabla_ventas.column("total", width=90, anchor="e")
         tabla_ventas.column("fecha", width=160, anchor="center")
+        tabla_ventas.column("estado", width=90, anchor="center")
 
         scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=tabla_ventas.yview)
         tabla_ventas.configure(yscroll=scrollbar.set)
@@ -481,7 +523,7 @@ class AplicacionInventario(ctk.CTk):
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color="#2E7D32"
         )
-        lbl_total_acumulado.pack(pady=10)
+        lbl_total_acumulado.pack(pady=(0, 10))
 
         def poner_fechas(desde, hasta):
             for entry, valor in ((entry_desde, desde), (entry_hasta, hasta)):
@@ -518,18 +560,66 @@ class AplicacionInventario(ctk.CTk):
                 return
 
             dinero_total = 0.0
+            lineas_validas = 0
             for v in ventas:
-                id_venta, prod_id, nombre_prod, cant, total, fecha = v
-                dinero_total += total
-                tabla_ventas.insert("", "end", values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha))
+                id_venta, prod_id, nombre_prod, cant, total, fecha, anulada = v
+                if anulada:
+                    tabla_ventas.insert(
+                        "", "end", iid=str(id_venta), tags=("anulada",),
+                        values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha, "Anulada")
+                    )
+                else:
+                    dinero_total += total
+                    lineas_validas += 1
+                    tabla_ventas.insert(
+                        "", "end", iid=str(id_venta),
+                        values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha, "OK")
+                    )
 
             if desde or hasta:
                 periodo = f"{desde or 'el inicio'} a {hasta or 'hoy'}"
             else:
                 periodo = "todo el historial"
             lbl_total_acumulado.configure(
-                text=f"Total Recaudado ({periodo}): ${dinero_total:,.2f}  ·  {len(ventas)} líneas de venta"
+                text=f"Total Recaudado ({periodo}): ${dinero_total:,.2f}  ·  {lineas_validas} líneas de venta"
             )
+
+        def anular_seleccionadas():
+            seleccion = tabla_ventas.selection()
+            if not seleccion:
+                messagebox.showwarning(
+                    "Selección Requerida", "Selecciona una o más ventas para anular.", parent=ventana_ventas
+                )
+                return
+            if not messagebox.askyesno(
+                "Confirmar",
+                f"¿Anular {len(seleccion)} línea(s) de venta? Las unidades volverán al stock.",
+                parent=ventana_ventas
+            ):
+                return
+
+            try:
+                exito, mensaje = db.anular_ventas([int(iid) for iid in seleccion])
+            except (sqlite3.Error, OSError) as error:
+                messagebox.showerror(
+                    "Error de Base de Datos",
+                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
+                    parent=ventana_ventas
+                )
+                return
+
+            if exito:
+                messagebox.showinfo("Venta Anulada", mensaje, parent=ventana_ventas)
+                cargar_ventas()
+                self.limpiar_formulario()
+                self.cargar_productos_en_tabla()
+            else:
+                messagebox.showerror("No se pudo anular", mensaje, parent=ventana_ventas)
+
+        ctk.CTkButton(
+            ventana_ventas, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#D32F2F", hover_color="#B71C1C", command=anular_seleccionadas
+        ).pack(before=lbl_total_acumulado, pady=(0, 8))
 
         hoy = date.today()
         botones_rapidos = (
@@ -547,6 +637,104 @@ class AplicacionInventario(ctk.CTk):
         cargar_ventas()
 
     @manejar_errores_bd
+    def abrir_ventana_entradas(self):
+        """Registra la llegada de mercancía para el producto seleccionado y muestra el historial de entradas."""
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Entrada de Mercancía")
+        ventana.geometry("640x480")
+        ventana.grab_set()
+
+        ctk.CTkLabel(
+            ventana, text="📥 Entrada de Mercancía", font=ctk.CTkFont(size=18, weight="bold")
+        ).pack(pady=10)
+
+        producto = db.obtener_producto(self.id_producto_seleccionado) if self.id_producto_seleccionado else None
+        if producto:
+            texto_producto = f"Producto: {producto[1]}  ·  Stock actual: {producto[4]}"
+        else:
+            texto_producto = "Selecciona un producto en la tabla principal para registrar una entrada."
+        lbl_producto = ctk.CTkLabel(ventana, text=texto_producto, font=ctk.CTkFont(size=14))
+        lbl_producto.pack(padx=15)
+
+        frame_registro = ctk.CTkFrame(ventana, fg_color="transparent")
+        frame_registro.pack(pady=8)
+        entry_cantidad = ctk.CTkEntry(
+            frame_registro, width=160, placeholder_text="Unidades recibidas", font=ctk.CTkFont(size=14)
+        )
+        entry_cantidad.pack(side="left", padx=5)
+        btn_registrar = ctk.CTkButton(
+            frame_registro, text="Registrar Entrada", font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#00838F", hover_color="#005662"
+        )
+        btn_registrar.pack(side="left", padx=5)
+        if not producto:
+            entry_cantidad.configure(state="disabled")
+            btn_registrar.configure(state="disabled")
+
+        frame_tabla = ctk.CTkFrame(ventana)
+        frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
+
+        columnas = ("id", "producto", "cantidad", "fecha")
+        tabla_entradas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
+        tabla_entradas.heading("id", text="ID")
+        tabla_entradas.heading("producto", text="Producto")
+        tabla_entradas.heading("cantidad", text="Unidades")
+        tabla_entradas.heading("fecha", text="Fecha y Hora")
+        tabla_entradas.column("id", width=50, anchor="center")
+        tabla_entradas.column("producto", width=220)
+        tabla_entradas.column("cantidad", width=80, anchor="center")
+        tabla_entradas.column("fecha", width=160, anchor="center")
+
+        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=tabla_entradas.yview)
+        tabla_entradas.configure(yscroll=scrollbar.set)
+        tabla_entradas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def cargar_entradas():
+            for item in tabla_entradas.get_children():
+                tabla_entradas.delete(item)
+            for entrada in db.obtener_entradas():
+                tabla_entradas.insert("", "end", values=entrada)
+
+        def registrar():
+            cant_str = entry_cantidad.get().strip()
+            try:
+                cantidad = int(cant_str)
+                if cantidad <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "Error", "La cantidad debe ser un número entero positivo.", parent=ventana
+                )
+                return
+
+            try:
+                exito, mensaje = db.registrar_entrada(producto[0], cantidad)
+                if exito:
+                    cargar_entradas()
+                    # El formulario tendría el stock anterior: se limpia para no sobrescribirlo
+                    self.limpiar_formulario()
+                    self.cargar_productos_en_tabla()
+                    actualizado = db.obtener_producto(producto[0])
+            except (sqlite3.Error, OSError) as error:
+                messagebox.showerror(
+                    "Error de Base de Datos",
+                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
+                    parent=ventana
+                )
+                return
+
+            if exito:
+                entry_cantidad.delete(0, "end")
+                lbl_producto.configure(text=f"Producto: {actualizado[1]}  ·  Stock actual: {actualizado[4]}")
+                messagebox.showinfo("Entrada Registrada", mensaje, parent=ventana)
+            else:
+                messagebox.showerror("Error", mensaje, parent=ventana)
+
+        btn_registrar.configure(command=registrar)
+        cargar_entradas()
+
+    @manejar_errores_bd
     def eliminar_producto(self):
         if not self.id_producto_seleccionado:
             messagebox.showwarning("Selección Requerida", "Selecciona un producto de la tabla.")
@@ -560,14 +748,8 @@ class AplicacionInventario(ctk.CTk):
             else:
                 messagebox.showerror("No se pudo eliminar", mensaje)
 
-    @manejar_errores_bd
-    def filtrar_productos(self, event):
-        texto = self.entry_buscar.get().strip()
-        if texto == "":
-            self.cargar_productos_en_tabla()
-        else:
-            resultados = db.buscar_producto_por_nombre(texto)
-            self.cargar_productos_en_tabla(resultados)
+    def filtrar_productos(self, _evento=None):
+        self.cargar_productos_en_tabla()
 
     def cambiar_modo(self):
         if self.switch_modo.get() == 1:

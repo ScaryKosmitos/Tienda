@@ -24,7 +24,8 @@ def conectar():
     return conexion
 
 def inicializar_db():
-    """Crea las tablas 'productos' y 'ventas' si no existen."""
+    """Crea las tablas 'productos', 'ventas' y 'entradas' si no existen, y
+    actualiza las bases de datos creadas con versiones anteriores."""
     conexion = conectar()
     try:
         with conexion:
@@ -49,6 +50,24 @@ def inicializar_db():
                     nombre_producto TEXT NOT NULL,
                     cantidad INTEGER NOT NULL,
                     total REAL NOT NULL,
+                    fecha TEXT NOT NULL,
+                    anulada INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY (producto_id) REFERENCES productos (id)
+                )
+            """)
+
+            # Las bases de datos anteriores no tienen la columna 'anulada'
+            columnas_ventas = [fila[1] for fila in cursor.execute("PRAGMA table_info(ventas)")]
+            if "anulada" not in columnas_ventas:
+                cursor.execute("ALTER TABLE ventas ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0")
+
+            # Tabla de Entradas de Mercancía (reposición de stock)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS entradas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    producto_id INTEGER NOT NULL,
+                    nombre_producto TEXT NOT NULL,
+                    cantidad INTEGER NOT NULL,
                     fecha TEXT NOT NULL,
                     FOREIGN KEY (producto_id) REFERENCES productos (id)
                 )
@@ -86,12 +105,41 @@ def obtener_productos():
     finally:
         conexion.close()
 
-def buscar_producto_por_nombre(texto_busqueda):
+def buscar_productos(texto="", categoria=None, stock_menor_a=None):
+    """
+    Filtra productos por nombre (texto parcial), categoría exacta y/o stock
+    menor a un valor. Los filtros vacíos o None se ignoran.
+    """
+    condiciones, parametros = [], []
+    if texto:
+        condiciones.append("nombre LIKE ?")
+        parametros.append(f"%{texto}%")
+    if categoria:
+        condiciones.append("categoria = ?")
+        parametros.append(categoria)
+    if stock_menor_a is not None:
+        condiciones.append("stock < ?")
+        parametros.append(stock_menor_a)
+
+    consulta = "SELECT * FROM productos"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT * FROM productos WHERE nombre LIKE ?", (f"%{texto_busqueda}%",))
+        cursor.execute(consulta, parametros)
         return cursor.fetchall()
+    finally:
+        conexion.close()
+
+def obtener_categorias():
+    """Retorna la lista de categorías distintas, en orden alfabético."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT DISTINCT categoria FROM productos ORDER BY categoria COLLATE NOCASE")
+        return [fila[0] for fila in cursor.fetchall()]
     finally:
         conexion.close()
 
@@ -117,8 +165,8 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
 
 def eliminar_producto(id_producto):
     """
-    Elimina un producto. Si tiene ventas asociadas en el historial,
-    rechaza el borrado para no dejar referencias rotas en 'ventas'.
+    Elimina un producto. Si tiene ventas o entradas de mercancía asociadas,
+    rechaza el borrado para no dejar referencias rotas en el historial.
     Retorna (exito: bool, mensaje: str).
     """
     conexion = conectar()
@@ -128,10 +176,13 @@ def eliminar_producto(id_producto):
             cursor.execute("SELECT COUNT(*) FROM ventas WHERE producto_id = ?", (id_producto,))
             if cursor.fetchone()[0] > 0:
                 return False, "No se puede eliminar: el producto tiene ventas registradas en el historial."
+            cursor.execute("SELECT COUNT(*) FROM entradas WHERE producto_id = ?", (id_producto,))
+            if cursor.fetchone()[0] > 0:
+                return False, "No se puede eliminar: el producto tiene entradas de mercancía registradas."
             cursor.execute("DELETE FROM productos WHERE id = ?", (id_producto,))
         return True, "Producto eliminado."
     except sqlite3.IntegrityError:
-        return False, "No se puede eliminar: el producto tiene ventas registradas en el historial."
+        return False, "No se puede eliminar: el producto tiene movimientos registrados en el historial."
     finally:
         conexion.close()
 
@@ -202,8 +253,9 @@ def registrar_venta_carrito(items):
 
 def obtener_ventas(desde=None, hasta=None):
     """
-    Retorna las ventas ordenadas de más reciente a más antigua. 'desde' y
-    'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
+    Retorna las ventas ordenadas de más reciente a más antigua, como
+    (id, producto_id, nombre_producto, cantidad, total, fecha, anulada).
+    'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
     condiciones, parametros = [], []
     if desde:
@@ -213,7 +265,7 @@ def obtener_ventas(desde=None, hasta=None):
         condiciones.append("date(fecha) <= ?")
         parametros.append(hasta)
 
-    consulta = "SELECT * FROM ventas"
+    consulta = "SELECT id, producto_id, nombre_producto, cantidad, total, fecha, anulada FROM ventas"
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY id DESC"
@@ -222,6 +274,88 @@ def obtener_ventas(desde=None, hasta=None):
     try:
         cursor = conexion.cursor()
         cursor.execute(consulta, parametros)
+        return cursor.fetchall()
+    finally:
+        conexion.close()
+
+
+def anular_ventas(ids_venta):
+    """
+    Anula una o varias líneas de venta: devuelve las unidades al stock y las
+    marca como anuladas (no se borran, para que quede registro).
+    Todo ocurre en una sola transacción. Retorna (exito: bool, mensaje: str).
+    """
+    if not ids_venta:
+        return False, "No hay ventas seleccionadas."
+
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            total_devuelto = 0.0
+            for id_venta in ids_venta:
+                cursor.execute(
+                    "SELECT producto_id, nombre_producto, cantidad, total, anulada FROM ventas WHERE id = ?",
+                    (id_venta,)
+                )
+                res = cursor.fetchone()
+                if not res:
+                    raise _VentaRechazada(f"La venta {id_venta} no existe.")
+                producto_id, nombre_producto, cantidad, total, anulada = res
+                if anulada:
+                    raise _VentaRechazada(f"La venta {id_venta} ({nombre_producto}) ya estaba anulada.")
+
+                cursor.execute("UPDATE productos SET stock = stock + ? WHERE id = ?", (cantidad, producto_id))
+                cursor.execute("UPDATE ventas SET anulada = 1 WHERE id = ?", (id_venta,))
+                total_devuelto += total
+
+        cantidad_lineas = len(ids_venta)
+        return True, (
+            f"Se anularon {cantidad_lineas} línea(s) de venta por ${total_devuelto:,.2f}. "
+            "Las unidades volvieron al stock."
+        )
+    except _VentaRechazada as rechazo:
+        return False, str(rechazo)
+    finally:
+        conexion.close()
+
+# --- ENTRADAS DE MERCANCÍA ---
+
+def registrar_entrada(id_producto, cantidad):
+    """
+    Suma unidades al stock de un producto (llegada de un pedido) y deja
+    registro en la tabla 'entradas'. Retorna (exito: bool, mensaje: str).
+    """
+    if cantidad <= 0:
+        return False, "La cantidad debe ser mayor a 0."
+
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            cursor.execute("SELECT nombre, stock FROM productos WHERE id = ?", (id_producto,))
+            res = cursor.fetchone()
+            if not res:
+                return False, "Producto no encontrado."
+
+            nombre_producto, stock_actual = res
+            cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, id_producto))
+            fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("""
+                INSERT INTO entradas (producto_id, nombre_producto, cantidad, fecha)
+                VALUES (?, ?, ?, ?)
+            """, (id_producto, nombre_producto, cantidad, fecha_actual))
+
+        return True, f"Entrada registrada: +{cantidad} de '{nombre_producto}'. Stock nuevo: {stock_actual + cantidad}."
+    finally:
+        conexion.close()
+
+def obtener_entradas():
+    """Retorna las entradas de mercancía, de la más reciente a la más antigua."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT id, nombre_producto, cantidad, fecha FROM entradas ORDER BY id DESC")
         return cursor.fetchall()
     finally:
         conexion.close()
