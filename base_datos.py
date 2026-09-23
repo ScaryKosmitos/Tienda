@@ -59,11 +59,12 @@ def inicializar_db():
 # --- OPERACIONES CRUD DE PRODUCTOS ---
 
 def agregar_producto(nombre, categoria, precio, stock):
-    """Retorna (exito: bool, mensaje: str)."""
+    """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
+    con stock 0 (por ejemplo, uno que todavía no ha llegado)."""
     if not math.isfinite(precio) or precio <= 0:
         return False, "El precio debe ser mayor a 0."
-    if stock <= 0:
-        return False, "El stock debe ser mayor a 0."
+    if stock < 0:
+        return False, "El stock no puede ser negativo."
 
     conexion = conectar()
     try:

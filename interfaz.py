@@ -36,6 +36,7 @@ class AplicacionInventario(ctk.CTk):
         # Variables internas de selección
         self.id_producto_seleccionado = None
         self.orden_ascendente = True
+        self.columna_ordenada = None
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -168,8 +169,12 @@ class AplicacionInventario(ctk.CTk):
 
         # Ajuste de tamaño de fuente en la tabla
         estilo = ttk.Style()
+        # El tema "clam" respeta los colores personalizados, lo que permite
+        # que la tabla cambie entre modo claro y oscuro
+        estilo.theme_use("clam")
         estilo.configure("Treeview", font=("TkDefaultFont", 13), rowheight=28)
         estilo.configure("Treeview.Heading", font=("TkDefaultFont", 14, "bold"))
+        self.aplicar_colores_tabla()
 
         # Encabezados con función de ordenamiento al hacer clic
         self.tabla.heading("id", text="ID ↕", command=lambda: self.ordenar_por_columna("id", 0))
@@ -208,7 +213,25 @@ class AplicacionInventario(ctk.CTk):
             else:
                 self.tabla.insert("", "end", values=prod)
 
+    def aplicar_colores_tabla(self):
+        """Ajusta los colores de las tablas (inventario e historial) al modo actual."""
+        if ctk.get_appearance_mode() == "Dark":
+            fondo, texto, fondo_encabezado, seleccion = "#2b2b2b", "#e8e8e8", "#3a3a3a", "#1f538d"
+        else:
+            fondo, texto, fondo_encabezado, seleccion = "#ffffff", "#1a1a1a", "#e3e3e3", "#3a7ebf"
+
+        estilo = ttk.Style()
+        estilo.configure("Treeview", background=fondo, fieldbackground=fondo, foreground=texto)
+        estilo.map("Treeview", background=[("selected", seleccion)], foreground=[("selected", "#ffffff")])
+        estilo.configure("Treeview.Heading", background=fondo_encabezado, foreground=texto)
+        estilo.map("Treeview.Heading", background=[("active", seleccion)], foreground=[("active", "#ffffff")])
+
     def ordenar_por_columna(self, columna, indice):
+        # Al cambiar de columna, el primer clic siempre ordena de menor a mayor
+        if columna != self.columna_ordenada:
+            self.orden_ascendente = True
+            self.columna_ordenada = columna
+
         filas = [(self.tabla.set(k, columna), k) for k in self.tabla.get_children("")]
 
         if columna in ("precio", "stock", "id"):
@@ -383,6 +406,7 @@ class AplicacionInventario(ctk.CTk):
             ctk.set_appearance_mode("Dark")
         else:
             ctk.set_appearance_mode("Light")
+        self.aplicar_colores_tabla()
 
     def limpiar_formulario(self):
         self.id_producto_seleccionado = None
