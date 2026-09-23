@@ -1,11 +1,14 @@
+import os
 import sqlite3
 from datetime import date, datetime, timedelta
 from functools import wraps
 
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import base_datos as db
-from formato import formatear_cambio, formatear_numero, formatear_precio, leer_entero, leer_precio
+from formato import (
+    describir_periodo, formatear_cambio, formatear_numero, formatear_precio, leer_entero, leer_precio
+)
 
 
 def manejar_errores_bd(func):
@@ -671,7 +674,7 @@ class AplicacionInventario(ctk.CTk):
     def abrir_ventana_ventas(self):
         ventana_ventas = ctk.CTkToplevel(self)
         ventana_ventas.title("Historial de Ventas")
-        ventana_ventas.geometry("820x600")
+        ventana_ventas.geometry("820x640")
         ventana_ventas.grab_set()
 
         lbl_titulo = ctk.CTkLabel(
@@ -689,6 +692,9 @@ class AplicacionInventario(ctk.CTk):
         ctk.CTkLabel(frame_filtros, text="Hasta:", font=ctk.CTkFont(size=13)).pack(side="left")
         entry_hasta = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
         entry_hasta.pack(side="left", padx=(4, 10))
+
+        # Período que se está mostrando; es el que se exporta a Excel
+        rango_actual = {"desde": None, "hasta": None}
 
         # Dos pestañas que comparten los filtros de fecha
         pestanas = ctk.CTkTabview(ventana_ventas)
@@ -806,6 +812,7 @@ class AplicacionInventario(ctk.CTk):
                     parent=ventana_ventas
                 )
                 return
+            rango_actual["desde"], rango_actual["hasta"] = desde, hasta
 
             dinero_total = 0.0
             lineas_validas = 0
@@ -824,10 +831,7 @@ class AplicacionInventario(ctk.CTk):
                         values=(id_venta, nombre_prod, formatear_numero(cant), formatear_precio(total), fecha, "OK")
                     )
 
-            if desde or hasta:
-                periodo = f"{desde or 'el inicio'} a {hasta or 'hoy'}"
-            else:
-                periodo = "todo el historial"
+            periodo = describir_periodo(desde, hasta)
             lbl_total_acumulado.configure(
                 text=f"Total Recaudado ({periodo}): {formatear_precio(dinero_total)}  ·  {lineas_validas} líneas de venta"
             )
@@ -878,6 +882,62 @@ class AplicacionInventario(ctk.CTk):
                 self.cargar_productos_en_tabla()
             else:
                 messagebox.showerror("No se pudo anular", mensaje, parent=ventana_ventas)
+
+        def exportar_a_excel():
+            try:
+                # Se importa aquí para que la tienda funcione aunque falte openpyxl
+                import exportar
+            except ImportError:
+                messagebox.showerror(
+                    "Falta una Librería",
+                    "Para exportar a Excel hay que instalar 'openpyxl':\n\nsudo pacman -S python-openpyxl",
+                    parent=ventana_ventas
+                )
+                return
+
+            desde, hasta = rango_actual["desde"], rango_actual["hasta"]
+            if desde or hasta:
+                nombre_sugerido = f"Reporte_Tienda_{desde or 'inicio'}_a_{hasta or date.today()}.xlsx"
+            else:
+                nombre_sugerido = f"Reporte_Tienda_completo_{date.today()}.xlsx"
+            ruta = filedialog.asksaveasfilename(
+                parent=ventana_ventas,
+                title="Guardar reporte de Excel",
+                initialdir=os.path.expanduser("~"),
+                initialfile=nombre_sugerido,
+                defaultextension=".xlsx",
+                filetypes=[("Libro de Excel", "*.xlsx")],
+            )
+            if not ruta:
+                return
+            if not ruta.lower().endswith(".xlsx"):
+                ruta += ".xlsx"
+
+            try:
+                cantidad_ventas, cantidad_productos = exportar.exportar_excel(ruta, desde, hasta, STOCK_BAJO)
+            except PermissionError:
+                messagebox.showerror(
+                    "No se pudo guardar",
+                    "No se pudo escribir el archivo. Si lo tienes abierto en Excel o LibreOffice, "
+                    "ciérralo e inténtalo de nuevo.",
+                    parent=ventana_ventas
+                )
+                return
+            except (sqlite3.Error, OSError) as error:
+                messagebox.showerror("No se pudo exportar", f"Ocurrió un problema:\n{error}", parent=ventana_ventas)
+                return
+
+            messagebox.showinfo(
+                "Reporte Exportado",
+                f"Se guardó el reporte ({describir_periodo(desde, hasta)}):\n{ruta}\n\n"
+                f"Hojas: Ventas ({cantidad_ventas} líneas), Más vendidos e Inventario ({cantidad_productos} productos).",
+                parent=ventana_ventas
+            )
+
+        ctk.CTkButton(
+            ventana_ventas, text="📊 Exportar a Excel", font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#2E7D32", hover_color="#1B5E20", command=exportar_a_excel
+        ).pack(before=pestanas, side="bottom", pady=(0, 12))
 
         ctk.CTkButton(
             tab_ventas, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),

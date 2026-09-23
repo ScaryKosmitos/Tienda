@@ -60,3 +60,10 @@ def formatear_cambio(valor):
 def formatear_precio(valor):
     """1500 -> '$1.500'."""
     return f"${formatear_numero(valor)}"
+
+
+def describir_periodo(desde, hasta):
+    """Texto de un rango de fechas: '2026-09-01 a 2026-09-23', 'el inicio a 2026-09-23' o 'todo el historial'."""
+    if desde or hasta:
+        return f"{desde or 'el inicio'} a {hasta or 'hoy'}"
+    return "todo el historial"
