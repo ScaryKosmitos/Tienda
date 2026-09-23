@@ -1,7 +1,7 @@
 """
 Ventana del historial de ventas, con dos pestañas que comparten los filtros
-de fecha: el historial (donde se pueden anular ventas) y el ranking de
-productos más vendidos. También exporta el período a Excel.
+de fecha: el historial (donde se pueden ver los recibos y anular ventas) y el
+ranking de productos más vendidos. También exporta el período a Excel.
 """
 import os
 from datetime import date, datetime, timedelta
@@ -12,6 +12,8 @@ import customtkinter as ctk
 import base_datos as db
 from componentes import ERRORES_BD, STOCK_BAJO, crear_tabla, mostrar_error_bd, vaciar_tabla
 from formato import describir_periodo, formatear_numero, formatear_precio
+from recibo import numero_recibo
+from ventana_recibo import VentanaRecibo
 
 
 class VentanaVentas(ctk.CTkToplevel):
@@ -80,6 +82,7 @@ class VentanaVentas(ctk.CTkToplevel):
         frame_tabla.pack(fill="both", expand=True, pady=(0, 8))
         self.tabla_ventas = crear_tabla(frame_tabla, [
             ("id", "ID Venta", {"width": 60, "anchor": "center"}),
+            ("recibo", "Recibo", {"width": 70, "anchor": "center"}),
             ("producto", "Producto", {"width": 180}),
             ("cantidad", "Cant.", {"width": 60, "anchor": "center"}),
             ("total", "Total ($)", {"width": 90, "anchor": "e"}),
@@ -88,10 +91,16 @@ class VentanaVentas(ctk.CTkToplevel):
         ])
         self.tabla_ventas.tag_configure("anulada", foreground="#888888")
 
+        frame_botones = ctk.CTkFrame(pestana, fg_color="transparent")
+        frame_botones.pack(pady=(0, 8))
         ctk.CTkButton(
-            pestana, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
+            frame_botones, text="🧾 Ver Recibo", font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#00838F", hover_color="#005662", command=self.ver_recibo
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            frame_botones, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#D32F2F", hover_color="#B71C1C", command=self.anular_seleccionadas
-        ).pack(pady=(0, 8))
+        ).pack(side="left", padx=4)
 
         self.lbl_total = ctk.CTkLabel(
             pestana, text="", font=ctk.CTkFont(size=17, weight="bold"), text_color="#2E7D32"
@@ -178,16 +187,20 @@ class VentanaVentas(ctk.CTkToplevel):
     def mostrar_ventas(self, ventas, periodo):
         dinero_total = 0.0
         lineas_validas = 0
-        for id_venta, _prod_id, nombre, cantidad, total, fecha, anulada in ventas:
-            if anulada:
+        for venta in ventas:
+            if venta["anulada"]:
                 estado, etiquetas = "Anulada", ("anulada",)
             else:
                 estado, etiquetas = "OK", ()
-                dinero_total += total
+                dinero_total += venta["total"]
                 lineas_validas += 1
+            recibo = numero_recibo(venta["recibo_id"]) if venta["recibo_id"] else "—"
             self.tabla_ventas.insert(
-                "", "end", iid=str(id_venta), tags=etiquetas,
-                values=(id_venta, nombre, formatear_numero(cantidad), formatear_precio(total), fecha, estado)
+                "", "end", iid=str(venta["id"]), tags=etiquetas,
+                values=(
+                    venta["id"], recibo, venta["nombre_producto"], formatear_numero(venta["cantidad"]),
+                    formatear_precio(venta["total"]), venta["fecha"], estado
+                )
             )
 
         self.lbl_total.configure(
@@ -212,6 +225,35 @@ class VentanaVentas(ctk.CTkToplevel):
             self.lbl_resumen_ranking.configure(text=f"No hay ventas en este período ({periodo}).")
 
     # --- ACCIONES ---
+
+    def ver_recibo(self):
+        seleccion = self.tabla_ventas.selection()
+        if not seleccion:
+            messagebox.showwarning("Selección Requerida", "Selecciona una venta para ver su recibo.", parent=self)
+            return
+
+        # La columna muestra el número con ceros (000007) o "—" si la venta no tiene recibo
+        recibos = {self.tabla_ventas.set(iid, "recibo") for iid in seleccion}
+        if len(recibos) > 1:
+            messagebox.showwarning(
+                "Varios Recibos", "Las líneas seleccionadas son de recibos distintos. Selecciona una sola venta.",
+                parent=self
+            )
+            return
+        numero = recibos.pop()
+        if not numero.isdigit():
+            messagebox.showinfo(
+                "Sin Recibo", "Esta venta se registró antes de que existieran los recibos, así que no tiene uno.",
+                parent=self
+            )
+            return
+
+        try:
+            recibo = db.obtener_recibo(int(numero))
+        except ERRORES_BD as error:
+            mostrar_error_bd(error, parent=self)
+            return
+        VentanaRecibo(self, recibo)
 
     def anular_seleccionadas(self):
         seleccion = self.tabla_ventas.selection()

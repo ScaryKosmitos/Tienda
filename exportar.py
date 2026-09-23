@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 import base_datos as db
 from formato import describir_periodo
+from recibo import numero_recibo
 
 ESTILO_TITULO = Font(size=14, bold=True)
 ESTILO_ENCABEZADO = Font(bold=True, color="FFFFFF")
@@ -76,7 +77,7 @@ def _ancho(textos, minimo=10, maximo=45):
 
 def _hoja_ventas(hoja, desde, hasta, generado):
     ventas = db.obtener_ventas(desde, hasta)
-    encabezados = ("ID Venta", "Fecha y Hora", "Producto", "Cantidad", "Total", "Estado")
+    encabezados = ("ID Venta", "Recibo", "Fecha y Hora", "Producto", "Cantidad", "Total", "Estado")
     fila = _preparar_hoja(
         hoja, f"Ventas: {describir_periodo(desde, hasta)} (generado {generado})", encabezados
     )
@@ -84,27 +85,29 @@ def _hoja_ventas(hoja, desde, hasta, generado):
     total_recaudado = 0.0
     # obtener_ventas las da de la más reciente a la más antigua; en Excel se
     # leen mejor en orden cronológico
-    for id_venta, _prod_id, nombre, cantidad, total, fecha, anulada in reversed(ventas):
+    for venta in reversed(ventas):
+        anulada, total = venta["anulada"], venta["total"]
         valores = (
-            id_venta, datetime.strptime(fecha, "%Y-%m-%d %H:%M:%S"), nombre, cantidad, total,
-            "Anulada" if anulada else "OK",
+            venta["id"], numero_recibo(venta["recibo_id"]) if venta["recibo_id"] else "—",
+            datetime.strptime(venta["fecha"], "%Y-%m-%d %H:%M:%S"), venta["nombre_producto"],
+            venta["cantidad"], total, "Anulada" if anulada else "OK",
         )
         for columna, valor in enumerate(valores, start=1):
             celda = hoja.cell(row=fila, column=columna, value=valor)
             if anulada:
                 celda.font = ESTILO_ANULADA
-        hoja.cell(row=fila, column=2).number_format = FORMATO_FECHA
-        hoja.cell(row=fila, column=4).number_format = FORMATO_UNIDADES
-        hoja.cell(row=fila, column=5).number_format = _formato_pesos(total)
+        hoja.cell(row=fila, column=3).number_format = FORMATO_FECHA
+        hoja.cell(row=fila, column=5).number_format = FORMATO_UNIDADES
+        hoja.cell(row=fila, column=6).number_format = _formato_pesos(total)
         if not anulada:
             total_recaudado += total
         fila += 1
 
     _terminar_hoja(hoja, fila - 1, len(encabezados), (
-        10, 18, _ancho([v[2] for v in ventas] + ["Producto"]), 11, 14, 10
-    ), columnas_centradas=(1, 6))
+        10, 10, 18, _ancho([v["nombre_producto"] for v in ventas] + ["Producto"]), 11, 14, 10
+    ), columnas_centradas=(1, 2, 7))
 
-    _fila_total(hoja, fila + 1, 5, "Total recaudado (sin anuladas)", total_recaudado)
+    _fila_total(hoja, fila + 1, 6, "Total recaudado (sin anuladas)", total_recaudado)
     return len(ventas)
 
 

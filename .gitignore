@@ -3,3 +3,4 @@ __pycache__/
 inventario.db
 respaldos/
 .venv/
+recibos/

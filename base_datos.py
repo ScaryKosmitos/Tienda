@@ -54,6 +54,16 @@ def inicializar_db():
                 )
             """)
 
+            # Un recibo agrupa las líneas de una misma venta y guarda con cuánto pagó el cliente
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS recibos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fecha TEXT NOT NULL,
+                    total REAL NOT NULL,
+                    pago REAL NOT NULL
+                )
+            """)
+
             # Tabla de Historial de Ventas (POS)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ventas (
@@ -64,14 +74,18 @@ def inicializar_db():
                     total REAL NOT NULL,
                     fecha TEXT NOT NULL,
                     anulada INTEGER NOT NULL DEFAULT 0,
+                    recibo_id INTEGER REFERENCES recibos (id),
                     FOREIGN KEY (producto_id) REFERENCES productos (id)
                 )
             """)
 
-            # Las bases de datos anteriores no tienen la columna 'anulada'
+            # Las bases de datos anteriores no tienen las columnas 'anulada' y 'recibo_id'
+            # (las ventas hechas antes de que existieran los recibos quedan sin recibo)
             columnas_ventas = [fila[1] for fila in cursor.execute("PRAGMA table_info(ventas)")]
             if "anulada" not in columnas_ventas:
                 cursor.execute("ALTER TABLE ventas ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0")
+            if "recibo_id" not in columnas_ventas:
+                cursor.execute("ALTER TABLE ventas ADD COLUMN recibo_id INTEGER REFERENCES recibos (id)")
 
             # Movimientos de stock: entradas de mercancía, stock inicial y ajustes manuales
             cursor.execute("""
@@ -273,17 +287,18 @@ def obtener_producto(id_producto):
         conexion.close()
 
 
-def registrar_venta_carrito(items):
+def registrar_venta_carrito(items, pago=None):
     """
     Registra la venta de varios productos a la vez. 'items' es una lista de
     (id_producto, cantidad). Verifica el stock de cada uno, lo descuenta y
-    registra una línea por producto, todas con la misma fecha y hora.
+    registra una línea por producto, todas con la misma fecha y hora y el
+    mismo recibo. 'pago' es el dinero que entregó el cliente (None = pago exacto).
     El nombre y el precio se leen de la base de datos en la misma transacción.
     Si un solo producto falla, no se registra nada: la venta es todo o nada.
-    Retorna (exito: bool, mensaje: str).
+    Retorna (exito: bool, mensaje: str, id_recibo: int o None).
     """
     if not items:
-        return False, "El carrito está vacío."
+        return False, "El carrito está vacío.", None
 
     conexion = conectar()
     try:
@@ -291,6 +306,10 @@ def registrar_venta_carrito(items):
             cursor = conexion.cursor()
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             total_venta = 0.0
+
+            # El total y el pago se completan al final, cuando se conoce el total
+            cursor.execute("INSERT INTO recibos (fecha, total, pago) VALUES (?, 0, 0)", (fecha_actual,))
+            id_recibo = cursor.lastrowid
 
             for id_producto, cantidad in items:
                 cursor.execute("SELECT nombre, precio, stock FROM productos WHERE id = ?", (id_producto,))
@@ -310,13 +329,42 @@ def registrar_venta_carrito(items):
                 total = cantidad * precio_unitario
                 total_venta += total
                 cursor.execute("""
-                    INSERT INTO ventas (producto_id, nombre_producto, cantidad, total, fecha)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (id_producto, nombre_producto, cantidad, total, fecha_actual))
+                    INSERT INTO ventas (producto_id, nombre_producto, cantidad, total, fecha, recibo_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (id_producto, nombre_producto, cantidad, total, fecha_actual, id_recibo))
 
-        return True, f"Venta realizada. Total: {formatear_precio(total_venta)}"
+            if pago is None:
+                pago = total_venta
+            elif round(pago, 2) < round(total_venta, 2):
+                raise _VentaRechazada(
+                    f"El pago ({formatear_precio(pago)}) no alcanza para el total ({formatear_precio(total_venta)})."
+                )
+            cursor.execute("UPDATE recibos SET total = ?, pago = ? WHERE id = ?", (total_venta, pago, id_recibo))
+
+        return True, f"Venta realizada. Total: {formatear_precio(total_venta)}", id_recibo
     except _VentaRechazada as rechazo:
-        return False, str(rechazo)
+        return False, str(rechazo), None
+    finally:
+        conexion.close()
+
+
+def obtener_recibo(id_recibo):
+    """
+    Retorna un diccionario con los datos del recibo (id, fecha, total, pago) y
+    sus 'lineas' (nombre_producto, cantidad, total, anulada), o None si no existe.
+    """
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT id, fecha, total, pago FROM recibos WHERE id = ?", (id_recibo,))
+        recibo = cursor.fetchone()
+        if not recibo:
+            return None
+        cursor.execute(
+            "SELECT nombre_producto, cantidad, total, anulada FROM ventas WHERE recibo_id = ? ORDER BY id",
+            (id_recibo,)
+        )
+        return {**dict(recibo), "lineas": cursor.fetchall()}
     finally:
         conexion.close()
 
@@ -335,13 +383,14 @@ def _filtro_fechas(desde, hasta):
 
 def obtener_ventas(desde=None, hasta=None):
     """
-    Retorna las ventas ordenadas de más reciente a más antigua, como
-    (id, producto_id, nombre_producto, cantidad, total, fecha, anulada).
+    Retorna las ventas ordenadas de más reciente a más antigua, con las
+    columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada
+    y recibo_id (None en las ventas hechas antes de que existieran los recibos).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
     condiciones, parametros = _filtro_fechas(desde, hasta)
 
-    consulta = "SELECT id, producto_id, nombre_producto, cantidad, total, fecha, anulada FROM ventas"
+    consulta = "SELECT id, producto_id, nombre_producto, cantidad, total, fecha, anulada, recibo_id FROM ventas"
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY id DESC"

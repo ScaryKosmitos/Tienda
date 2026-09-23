@@ -18,6 +18,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Carrito con varios productos por venta. La venta es "todo o nada": si un producto no tiene
   stock suficiente, no se registra ninguno.
 - Cálculo del cambio al cobrar, según con cuánto paga el cliente.
+- Recibo de cada venta, con número, productos, total, dinero recibido y cambio. Se puede abrir
+  en el navegador para imprimirlo o guardarlo como PDF, y volver a verlo desde el historial.
 - Anulación de ventas: las unidades vuelven al stock y la venta queda marcada como anulada (no se borra).
 
 **Reportes**
@@ -76,6 +78,8 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 | Editar un producto | Hacer clic en él en la tabla, cambiar los datos y pulsar **Actualizar Producto**. |
 | Vender | Seleccionar el producto, escribir la cantidad, pulsar **Agregar al Carrito** y luego **💵 Cobrar Venta**. |
 | Registrar mercancía que llegó | Seleccionar el producto y pulsar **📥 Entrada de Mercancía**. |
+| Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **🖨 Abrir para imprimir o guardar** y luego Ctrl+P en el navegador. |
+| Ver un recibo anterior | En **📋 Historial de Ventas**, seleccionar la venta y pulsar **🧾 Ver Recibo**. |
 | Ver ventas, ranking o exportar | Pulsar **📋 Historial de Ventas**, elegir el período y usar las pestañas o **📊 Exportar a Excel**. |
 
 La tecla **Enter** sirve como atajo para guardar el formulario, agregar al carrito y confirmar el cobro.
@@ -88,12 +92,14 @@ Tienda/
 │
 ├── interfaz.py          Ventana principal: formulario, tabla de productos y carrito
 ├── ventana_pago.py      Ventana de cobro con el cálculo del cambio
+├── ventana_recibo.py    Ventana que muestra el recibo de una venta
 ├── ventana_ventas.py    Historial de ventas, más vendidos, anulaciones y exportación
 ├── ventana_entradas.py  Entradas de mercancía y movimientos de stock
 ├── componentes.py       Piezas compartidas por las ventanas (tablas, avisos de error)
 │
 ├── base_datos.py        Acceso a SQLite: productos, ventas, anulaciones, movimientos de stock y reportes
 ├── formato.py           Lectura y presentación de precios y cantidades en formato colombiano
+├── recibo.py            Armado del recibo (texto y página para imprimir)
 ├── exportar.py          Generación del reporte de Excel
 ├── respaldar.py         Copias de seguridad de la base de datos
 └── requirements.txt     Librerías necesarias
@@ -102,21 +108,34 @@ Tienda/
 El código está separado en dos capas:
 
 - **Interfaz** (`interfaz.py` y los archivos `ventana_*.py`): lo que se ve en pantalla.
-- **Datos** (`base_datos.py`, `formato.py`, `exportar.py` y `respaldar.py`): guardar, leer y presentar la información.
+- **Datos** (`base_datos.py`, `formato.py`, `recibo.py`, `exportar.py` y `respaldar.py`): guardar, leer y presentar la información.
 
 Las dependencias van en un solo sentido: la interfaz usa la capa de datos, nunca al revés.
 Por eso la lógica de datos puede usarse o probarse sin abrir ninguna ventana.
 
 ### Base de datos
 
-`inventario.db` tiene tres tablas:
+`inventario.db` tiene cuatro tablas:
 
 - **productos**: id, nombre, categoría, precio y stock.
-- **ventas**: una línea por producto vendido, con cantidad, total, fecha y si fue anulada.
-  Guarda también el nombre del producto, para que el historial se entienda aunque luego cambie.
+- **recibos**: uno por venta, con la fecha, el total y el dinero que entregó el cliente.
+- **ventas**: una línea por producto vendido, con cantidad, total, fecha, si fue anulada y el recibo
+  al que pertenece. Guarda también el nombre del producto, para que el historial se entienda aunque
+  luego cambie.
 - **entradas**: movimientos de stock (stock inicial, entradas de mercancía y ajustes manuales).
 
 Un producto que ya tiene ventas no se puede eliminar, para no dejar el historial incompleto.
+
+## Personalizar el recibo
+
+El nombre de la tienda y el mensaje del final del recibo están al principio de `recibo.py`:
+
+```python
+NOMBRE_TIENDA = "Mi Tienda"
+MENSAJE_FINAL = "¡Gracias por su compra!"
+```
+
+Cada recibo que se abre en el navegador queda guardado en la carpeta `recibos/`.
 
 ## Respaldos
 
@@ -133,5 +152,5 @@ python respaldar.py /ruta/a/la/usb   # en otra carpeta
 Para restaurar un respaldo: cerrar la aplicación, reemplazar `inventario.db` por la copia
 elegida (renombrándola a `inventario.db`) y volver a abrirla.
 
-La base de datos y los respaldos no se suben a git (están en `.gitignore`), porque contienen
-los datos reales de la tienda.
+La base de datos, los respaldos y los recibos no se suben a git (están en `.gitignore`), porque
+contienen los datos reales de la tienda.

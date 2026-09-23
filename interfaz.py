@@ -6,6 +6,7 @@ from componentes import STOCK_BAJO, manejar_errores_bd
 from formato import formatear_numero, formatear_precio, leer_entero, leer_precio
 from ventana_entradas import VentanaEntradas
 from ventana_pago import pedir_pago
+from ventana_recibo import VentanaRecibo
 from ventana_ventas import VentanaVentas
 
 ctk.set_appearance_mode("System")
@@ -543,17 +544,15 @@ class AplicacionInventario(ctk.CTk):
             return
 
         items = [(id_producto, linea["cantidad"]) for id_producto, linea in self.carrito.items()]
-        exito, mensaje = db.registrar_venta_carrito(items)
+        exito, mensaje, id_recibo = db.registrar_venta_carrito(items, pago)
 
         if exito:
-            messagebox.showinfo(
-                "Venta Realizada",
-                f"{mensaje}\n\nRecibido: {formatear_precio(pago)}\nCambio: {formatear_precio(pago - total)}"
-            )
             self.carrito.clear()
             self.actualizar_carrito()
             self.limpiar_formulario()
             self.cargar_productos_en_tabla()
+            # El recibo reemplaza al mensaje de "venta realizada": muestra total, pago y cambio
+            VentanaRecibo(self, db.obtener_recibo(id_recibo))
         else:
             messagebox.showerror("Error en Venta", mensaje)
 
