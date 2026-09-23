@@ -2,14 +2,15 @@ import math
 import os
 import sys
 import sqlite3
-import unicodedata
 from datetime import datetime
 
-from formato import formatear_cambio, formatear_numero, formatear_precio
+from formato import clave_orden, formatear_cambio, formatear_numero, formatear_precio, sin_tildes
 
-# Límite de unidades por producto: evita números tan grandes que SQLite no
-# puede guardarlos (y que casi siempre son un error al escribir)
+# Límites de unidades y de precio por producto: evitan números tan grandes que
+# SQLite no puede guardarlos o que desarman el recibo (y que casi siempre son un
+# error al escribir)
 STOCK_MAXIMO = 1_000_000
+PRECIO_MAXIMO = 100_000_000
 
 def _ruta_db():
     """
@@ -134,16 +135,45 @@ def validar_producto(precio, stock):
     """Retorna un mensaje de error si el precio o el stock no son válidos, o None si están bien."""
     if not math.isfinite(precio) or precio <= 0:
         return "El precio debe ser mayor a 0."
+    if precio > PRECIO_MAXIMO:
+        return f"El precio no puede ser mayor a {formatear_precio(PRECIO_MAXIMO)}."
     if stock < 0:
         return "El stock no puede ser negativo."
     if stock > STOCK_MAXIMO:
         return f"El stock no puede ser mayor a {formatear_numero(STOCK_MAXIMO)}."
     return None
 
-def _sin_tildes(texto):
-    """'Jabón LÁCTEO' -> 'jabon lacteo', para buscar sin importar tildes ni mayúsculas."""
-    descompuesto = unicodedata.normalize("NFD", texto.casefold())
-    return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+def _nombre_repetido(cursor, nombre, excluir_id=None):
+    """
+    Si ya hay otro producto con ese nombre (sin importar mayúsculas ni tildes:
+    'Jabon' y 'Jabón' se consideran iguales), retorna su nombre; si no, None.
+    'excluir_id' ignora al producto que se está editando.
+    """
+    buscado = sin_tildes(nombre)
+    cursor.execute("SELECT nombre FROM productos WHERE id != ?", (excluir_id or -1,))
+    for (existente,) in cursor.fetchall():
+        if sin_tildes(existente) == buscado:
+            return existente
+    return None
+
+def nombre_repetido(nombre, excluir_id=None):
+    """Versión para la interfaz: permite avisar antes de preguntar por la categoría."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        if excluir_id is not None:
+            # Si el producto ya se llamaba así, no es un nombre nuevo: se permite
+            # editarlo aunque existiera un repetido de antes de esta validación
+            cursor.execute("SELECT nombre FROM productos WHERE id = ?", (excluir_id,))
+            actual = cursor.fetchone()
+            if actual and sin_tildes(actual["nombre"]) == sin_tildes(nombre):
+                return None
+        return _nombre_repetido(cursor, nombre, excluir_id)
+    finally:
+        conexion.close()
+
+def _mensaje_repetido(existente):
+    return f"Ya existe un producto llamado '{existente}'. Usa otro nombre o edita el que ya existe."
 
 def categoria_es_nueva(categoria):
     """True si no hay ningún producto con esa categoría (sin importar mayúsculas)."""
@@ -160,6 +190,9 @@ def agregar_producto(nombre, categoria, precio, stock):
     try:
         with conexion:
             cursor = conexion.cursor()
+            existente = _nombre_repetido(cursor, nombre)
+            if existente:
+                return False, _mensaje_repetido(existente)
             categoria = _categoria_existente(cursor, categoria)
             cursor.execute("""
                 INSERT INTO productos (nombre, categoria, precio, stock)
@@ -200,17 +233,18 @@ def buscar_productos(texto="", categoria=None, stock_menor_a=None):
     # El LIKE de SQLite no ignora tildes ni mayúsculas en letras como 'Á',
     # así que el filtro por nombre se hace aquí
     if texto:
-        buscado = _sin_tildes(texto)
-        productos = [p for p in productos if buscado in _sin_tildes(p[1])]
+        buscado = sin_tildes(texto)
+        productos = [p for p in productos if buscado in sin_tildes(p["nombre"])]
     return productos
 
 def obtener_categorias():
-    """Retorna la lista de categorías distintas, en orden alfabético."""
+    """Retorna la lista de categorías distintas, en orden alfabético español."""
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT DISTINCT categoria FROM productos ORDER BY categoria COLLATE NOCASE")
-        return [fila[0] for fila in cursor.fetchall()]
+        cursor.execute("SELECT DISTINCT categoria FROM productos")
+        # SQLite no ordena bien las tildes ni la ñ, así que se ordena aquí
+        return sorted((fila[0] for fila in cursor.fetchall()), key=clave_orden)
     finally:
         conexion.close()
 
@@ -225,10 +259,17 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
     try:
         with conexion:
             cursor = conexion.cursor()
-            cursor.execute("SELECT stock FROM productos WHERE id = ?", (id_producto,))
+            cursor.execute("SELECT nombre, stock FROM productos WHERE id = ?", (id_producto,))
             res = cursor.fetchone()
             if not res:
                 return False, "Producto no encontrado."
+
+            # Solo se revisa si cambia el nombre, para poder seguir editando
+            # productos repetidos que existieran antes de esta validación
+            if sin_tildes(nombre) != sin_tildes(res["nombre"]):
+                existente = _nombre_repetido(cursor, nombre, excluir_id=id_producto)
+                if existente:
+                    return False, _mensaje_repetido(existente)
 
             categoria = _categoria_existente(cursor, categoria, excluir_id=id_producto)
             cursor.execute("""
@@ -238,7 +279,7 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
             """, (nombre, categoria, precio, stock, id_producto))
 
             # Un cambio de stock hecho a mano queda registrado como ajuste
-            diferencia = stock - res[0]
+            diferencia = stock - res["stock"]
             if diferencia:
                 _registrar_movimiento(cursor, id_producto, nombre, diferencia, "Ajuste manual")
 

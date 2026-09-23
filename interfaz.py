@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 
 import base_datos as db
 from componentes import STOCK_BAJO, manejar_errores_bd
-from formato import formatear_numero, formatear_precio, leer_entero, leer_precio
+from formato import clave_orden, formatear_numero, formatear_precio, leer_entero, leer_precio
 from ventana_entradas import VentanaEntradas
 from ventana_pago import pedir_pago
 from ventana_recibo import VentanaRecibo
@@ -336,7 +336,7 @@ class AplicacionInventario(ctk.CTk):
             elif columna in ("stock", "id"):
                 clave = lambda x: leer_entero(str(x[0]))
             else:
-                clave = lambda x: str(x[0]).lower()
+                clave = lambda x: clave_orden(str(x[0]))
             filas.sort(key=clave, reverse=not self.orden_ascendente)
 
             for index, (_valor, k) in enumerate(filas):
@@ -404,6 +404,13 @@ class AplicacionInventario(ctk.CTk):
         error = db.validar_producto(precio, stock)
         if error:
             messagebox.showerror("Dato Inválido", error)
+            return
+        existente = db.nombre_repetido(nombre, excluir_id=self.id_producto_seleccionado)
+        if existente:
+            messagebox.showerror(
+                "Producto Repetido",
+                f"Ya existe un producto llamado '{existente}'. Usa otro nombre o edita el que ya existe."
+            )
             return
 
         if db.categoria_es_nueva(categoria) and not messagebox.askyesno(

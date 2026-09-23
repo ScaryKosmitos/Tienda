@@ -1,8 +1,10 @@
 """
 Lectura y presentación de precios en formato colombiano: punto para los
-miles y coma para los decimales (ej: $1.500 o $1.500,50).
+miles y coma para los decimales (ej: $1.500 o $1.500,50). También reúne las
+reglas para comparar y ordenar textos en español.
 """
 import re
+import unicodedata
 
 # 1.500 / 20.000 / 1.250.000  -> punto como separador de miles
 _MILES_CON_PUNTO = re.compile(r"\d{1,3}(\.\d{3})+(,\d{1,2})?")
@@ -60,6 +62,22 @@ def formatear_cambio(valor):
 def formatear_precio(valor):
     """1500 -> '$1.500'."""
     return f"${formatear_numero(valor)}"
+
+
+def sin_tildes(texto):
+    """'Jabón LÁCTEO' -> 'jabon lacteo', para comparar sin importar tildes ni mayúsculas."""
+    descompuesto = unicodedata.normalize("NFD", texto.casefold())
+    return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+
+
+def clave_orden(texto):
+    """
+    Clave para ordenar alfabéticamente en español: ignora mayúsculas y tildes
+    ('Ácido' va junto a 'Ajo') y pone la ñ después de la n ('Ñame' después de 'Nube').
+    """
+    # La ñ se cambia antes de quitar las tildes, porque si no quedaría como una n.
+    # '{' es el carácter que sigue a la 'z', así que 'n{' queda después de cualquier 'n...'
+    return sin_tildes(texto.casefold().replace("ñ", "n{"))
 
 
 def describir_periodo(desde, hasta):

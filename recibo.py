@@ -10,7 +10,7 @@ import base_datos as db
 from formato import formatear_numero, formatear_precio
 
 # Encabezado y pie del recibo: cámbialos aquí para personalizarlo
-NOMBRE_TIENDA = "Mi Tienda"
+NOMBRE_TIENDA = "Tienda Doña Lilibeth"
 MENSAJE_FINAL = "¡Gracias por su compra!"
 
 # Ancho del recibo en caracteres (parecido al de una impresora de recibos)
@@ -23,9 +23,13 @@ def numero_recibo(id_recibo):
 
 
 def _fila(izquierda, derecha):
-    """Texto a la izquierda y a la derecha, separados por espacios hasta completar el ancho."""
-    espacios = max(1, ANCHO - len(izquierda) - len(derecha))
-    return izquierda + " " * espacios + derecha
+    """
+    Texto a la izquierda y a la derecha, separados por espacios hasta completar
+    el ancho. Si no caben en una línea, el de la derecha pasa a la siguiente.
+    """
+    if len(izquierda) + 1 + len(derecha) > ANCHO:
+        return izquierda + "\n" + derecha.rjust(ANCHO)
+    return izquierda + " " * (ANCHO - len(izquierda) - len(derecha)) + derecha
 
 
 def texto_recibo(recibo):
