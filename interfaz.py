@@ -5,7 +5,7 @@ from functools import wraps
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import base_datos as db
-from formato import formatear_precio, leer_precio
+from formato import formatear_cambio, formatear_numero, formatear_precio, leer_entero, leer_precio
 
 
 def manejar_errores_bd(func):
@@ -74,7 +74,7 @@ class AplicacionInventario(ctk.CTk):
         self.entry_precio.pack(fill="x", padx=15, pady=5)
 
         self.entry_stock = ctk.CTkEntry(
-            self.frame_formulario, placeholder_text="Stock inicial", font=ctk.CTkFont(size=14)
+            self.frame_formulario, placeholder_text="Stock (unidades)", font=ctk.CTkFont(size=14)
         )
         self.entry_stock.pack(fill="x", padx=15, pady=5)
 
@@ -215,11 +215,12 @@ class AplicacionInventario(ctk.CTk):
         self.aplicar_colores_tabla()
 
         # Encabezados con función de ordenamiento al hacer clic
-        self.tabla.heading("id", text="ID ↕", command=lambda: self.ordenar_por_columna("id", 0))
-        self.tabla.heading("nombre", text="Nombre ↕", command=lambda: self.ordenar_por_columna("nombre", 1))
-        self.tabla.heading("categoria", text="Categoría ↕", command=lambda: self.ordenar_por_columna("categoria", 2))
-        self.tabla.heading("precio", text="Precio ($) ↕", command=lambda: self.ordenar_por_columna("precio", 3))
-        self.tabla.heading("stock", text="Stock ↕", command=lambda: self.ordenar_por_columna("stock", 4))
+        self.titulos_columnas = {
+            "id": "ID", "nombre": "Nombre", "categoria": "Categoría", "precio": "Precio ($)", "stock": "Stock"
+        }
+        for columna in columnas:
+            self.tabla.heading(columna, command=lambda c=columna: self.ordenar_por_columna(c))
+        self.actualizar_flechas_orden()
 
         self.tabla.column("id", width=50, anchor="center")
         self.tabla.column("nombre", width=200)
@@ -253,9 +254,22 @@ class AplicacionInventario(ctk.CTk):
             self.tabla.delete(item)
 
         for id_producto, nombre, categoria, precio, stock in lista_productos:
-            valores = (id_producto, nombre, categoria, formatear_precio(precio), stock)
+            valores = (id_producto, nombre, categoria, formatear_precio(precio), formatear_numero(stock))
             etiquetas = ("stock_bajo",) if stock < STOCK_BAJO else ()
-            self.tabla.insert("", "end", values=valores, tags=etiquetas)
+            self.tabla.insert("", "end", iid=str(id_producto), values=valores, tags=etiquetas)
+
+        # Recargar la tabla (tras una venta, búsqueda, etc.) no pierde el orden elegido
+        self.aplicar_orden()
+
+        # El formulario solo debe editar un producto que se ve seleccionado:
+        # si la búsqueda lo ocultó, se limpia para no sobrescribirlo por error
+        if self.id_producto_seleccionado:
+            iid = str(self.id_producto_seleccionado)
+            if self.tabla.exists(iid):
+                self.tabla.selection_set(iid)
+                self.tabla.see(iid)
+            else:
+                self.limpiar_formulario()
 
     def actualizar_menu_categorias(self):
         """Mantiene el menú de categorías al día con los productos existentes."""
@@ -319,25 +333,42 @@ class AplicacionInventario(ctk.CTk):
         estilo.configure("Treeview.Heading", background=fondo_encabezado, foreground=texto)
         estilo.map("Treeview.Heading", background=[("active", seleccion)], foreground=[("active", "#ffffff")])
 
-    def ordenar_por_columna(self, columna, indice):
-        # Al cambiar de columna, el primer clic siempre ordena de menor a mayor
-        if columna != self.columna_ordenada:
-            self.orden_ascendente = True
-            self.columna_ordenada = columna
-
-        filas = [(self.tabla.set(k, columna), k) for k in self.tabla.get_children("")]
-
-        if columna == "precio":
-            filas.sort(key=lambda x: leer_precio(x[0]), reverse=not self.orden_ascendente)
-        elif columna in ("stock", "id"):
-            filas.sort(key=lambda x: int(x[0]), reverse=not self.orden_ascendente)
+    def ordenar_por_columna(self, columna):
+        """Clic en un encabezado: la primera vez ordena de menor a mayor; otro clic invierte el orden."""
+        if columna == self.columna_ordenada:
+            self.orden_ascendente = not self.orden_ascendente
         else:
-            filas.sort(key=lambda x: x[0].lower(), reverse=not self.orden_ascendente)
+            self.columna_ordenada = columna
+            self.orden_ascendente = True
+        self.aplicar_orden()
 
-        for index, (val, k) in enumerate(filas):
-            self.tabla.move(k, "", index)
+    def aplicar_orden(self):
+        """Ordena las filas según la columna y dirección elegidas (si hay alguna)."""
+        columna = self.columna_ordenada
+        if columna:
+            filas = [(self.tabla.set(k, columna), k) for k in self.tabla.get_children("")]
 
-        self.orden_ascendente = not self.orden_ascendente
+            if columna == "precio":
+                clave = lambda x: leer_precio(x[0])
+            elif columna in ("stock", "id"):
+                clave = lambda x: leer_entero(str(x[0]))
+            else:
+                clave = lambda x: str(x[0]).lower()
+            filas.sort(key=clave, reverse=not self.orden_ascendente)
+
+            for index, (_valor, k) in enumerate(filas):
+                self.tabla.move(k, "", index)
+
+        self.actualizar_flechas_orden()
+
+    def actualizar_flechas_orden(self):
+        """▲ = de menor a mayor, ▼ = de mayor a menor, ↕ = columna sin ordenar."""
+        for columna, titulo in self.titulos_columnas.items():
+            if columna == self.columna_ordenada:
+                flecha = "▲" if self.orden_ascendente else "▼"
+            else:
+                flecha = "↕"
+            self.tabla.heading(columna, text=f"{titulo} {flecha}")
 
     def cargar_producto_en_formulario(self, event):
         item_seleccionado = self.tabla.selection()
@@ -345,6 +376,10 @@ class AplicacionInventario(ctk.CTk):
             return
 
         valores = self.tabla.item(item_seleccionado[0], "values")
+        # Si es el mismo producto que ya está en el formulario (se volvió a
+        # seleccionar tras una búsqueda), no se pisan los cambios sin guardar
+        if str(valores[0]) == str(self.id_producto_seleccionado):
+            return
         self.id_producto_seleccionado = valores[0]
 
         self.entry_nombre.delete(0, "end")
@@ -374,7 +409,7 @@ class AplicacionInventario(ctk.CTk):
 
         try:
             precio = leer_precio(precio_str)
-            stock = int(stock_str)
+            stock = leer_entero(stock_str)
         except ValueError:
             messagebox.showerror(
                 "Dato Inválido",
@@ -422,7 +457,7 @@ class AplicacionInventario(ctk.CTk):
             return
 
         try:
-            cantidad = int(cant_str)
+            cantidad = leer_entero(cant_str)
             if cantidad <= 0:
                 raise ValueError
         except ValueError:
@@ -441,7 +476,8 @@ class AplicacionInventario(ctk.CTk):
         if en_carrito + cantidad > stock:
             messagebox.showerror(
                 "Stock Insuficiente",
-                f"Solo quedan {stock} unidades de '{nombre}' y ya hay {en_carrito} en el carrito."
+                f"Solo quedan {formatear_numero(stock)} unidades de '{nombre}' "
+                f"y ya hay {formatear_numero(en_carrito)} en el carrito."
             )
             return
 
@@ -459,7 +495,7 @@ class AplicacionInventario(ctk.CTk):
             total += subtotal
             self.tabla_carrito.insert(
                 "", "end", iid=str(id_producto),
-                values=(linea["nombre"], linea["cantidad"], formatear_precio(linea["precio"]), formatear_precio(subtotal))
+                values=(linea["nombre"], formatear_numero(linea["cantidad"]), formatear_precio(linea["precio"]), formatear_precio(subtotal))
             )
         self.lbl_total_carrito.configure(text=f"Total: {formatear_precio(total)}")
 
@@ -641,14 +677,14 @@ class AplicacionInventario(ctk.CTk):
                 if anulada:
                     tabla_ventas.insert(
                         "", "end", iid=str(id_venta), tags=("anulada",),
-                        values=(id_venta, nombre_prod, cant, formatear_precio(total), fecha, "Anulada")
+                        values=(id_venta, nombre_prod, formatear_numero(cant), formatear_precio(total), fecha, "Anulada")
                     )
                 else:
                     dinero_total += total
                     lineas_validas += 1
                     tabla_ventas.insert(
                         "", "end", iid=str(id_venta),
-                        values=(id_venta, nombre_prod, cant, formatear_precio(total), fecha, "OK")
+                        values=(id_venta, nombre_prod, formatear_numero(cant), formatear_precio(total), fecha, "OK")
                     )
 
             if desde or hasta:
@@ -728,7 +764,7 @@ class AplicacionInventario(ctk.CTk):
 
         producto = db.obtener_producto(self.id_producto_seleccionado) if self.id_producto_seleccionado else None
         if producto:
-            texto_producto = f"Producto: {producto[1]}  ·  Stock actual: {producto[4]}"
+            texto_producto = f"Producto: {producto[1]}  ·  Stock actual: {formatear_numero(producto[4])}"
         else:
             texto_producto = "Selecciona un producto en la tabla principal para registrar una entrada."
         lbl_producto = ctk.CTkLabel(ventana, text=texto_producto, font=ctk.CTkFont(size=14))
@@ -779,12 +815,12 @@ class AplicacionInventario(ctk.CTk):
             for item in tabla_entradas.get_children():
                 tabla_entradas.delete(item)
             for id_mov, nombre, cantidad, fecha, motivo in db.obtener_entradas():
-                tabla_entradas.insert("", "end", values=(id_mov, nombre, f"{cantidad:+d}", fecha, motivo))
+                tabla_entradas.insert("", "end", values=(id_mov, nombre, formatear_cambio(cantidad), fecha, motivo))
 
         def registrar():
             cant_str = entry_cantidad.get().strip()
             try:
-                cantidad = int(cant_str)
+                cantidad = leer_entero(cant_str)
                 if cantidad <= 0:
                     raise ValueError
             except ValueError:
@@ -811,7 +847,9 @@ class AplicacionInventario(ctk.CTk):
 
             if exito:
                 entry_cantidad.delete(0, "end")
-                lbl_producto.configure(text=f"Producto: {actualizado[1]}  ·  Stock actual: {actualizado[4]}")
+                lbl_producto.configure(
+                    text=f"Producto: {actualizado[1]}  ·  Stock actual: {formatear_numero(actualizado[4])}"
+                )
                 messagebox.showinfo("Entrada Registrada", mensaje, parent=ventana)
             else:
                 messagebox.showerror("Error", mensaje, parent=ventana)

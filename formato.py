@@ -10,6 +10,8 @@ _MILES_CON_PUNTO = re.compile(r"\d{1,3}(\.\d{3})+(,\d{1,2})?")
 _MILES_CON_COMA = re.compile(r"\d{1,3}(,\d{3})+(\.\d{1,2})?")
 # 1500 / 1500.5 / 1500,50     -> sin miles, decimales opcionales
 _SIN_MILES = re.compile(r"\d+([.,]\d{1,2})?")
+# 1500 / 1.500 / -3           -> cantidades enteras (stock, unidades)
+_ENTERO = re.compile(r"-?(\d{1,3}(\.\d{3})+|\d+)")
 
 
 def leer_precio(texto):
@@ -29,6 +31,17 @@ def leer_precio(texto):
     raise ValueError(f"Precio no válido: {texto!r}")
 
 
+def leer_entero(texto):
+    """
+    Convierte una cantidad escrita por el usuario en un entero. Acepta punto
+    de miles ('1.500' -> 1500). Lanza ValueError si no es un entero válido.
+    """
+    limpio = texto.replace(" ", "").strip()
+    if not _ENTERO.fullmatch(limpio):
+        raise ValueError(f"Cantidad no válida: {texto!r}")
+    return int(limpio.replace(".", ""))
+
+
 def formatear_numero(valor):
     """1500 -> '1.500'; 1500.5 -> '1.500,50' (sin decimales si es entero)."""
     if float(valor).is_integer():
@@ -37,6 +50,11 @@ def formatear_numero(valor):
         texto = f"{valor:,.2f}"
     # Intercambiar separadores del formato inglés al colombiano
     return texto.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def formatear_cambio(valor):
+    """Cantidad con signo, para movimientos de stock: 1500 -> '+1.500'; -3 -> '-3'."""
+    return ("+" if valor > 0 else "") + formatear_numero(valor)
 
 
 def formatear_precio(valor):

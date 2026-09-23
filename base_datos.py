@@ -5,7 +5,7 @@ import sqlite3
 import unicodedata
 from datetime import datetime
 
-from formato import formatear_numero, formatear_precio
+from formato import formatear_cambio, formatear_numero, formatear_precio
 
 # Límite de unidades por producto: evita números tan grandes que SQLite no
 # puede guardarlos (y que casi siempre son un error al escribir)
@@ -224,7 +224,7 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
                 _registrar_movimiento(cursor, id_producto, nombre, diferencia, "Ajuste manual")
 
         if diferencia:
-            return True, f"Producto actualizado. Se registró un ajuste de stock de {diferencia:+d}."
+            return True, f"Producto actualizado. Se registró un ajuste de stock de {formatear_cambio(diferencia)}."
         return True, "Producto actualizado."
     finally:
         conexion.close()
@@ -296,7 +296,7 @@ def registrar_venta_carrito(items):
                 nombre_producto, precio_unitario, stock_actual = res
                 if stock_actual < cantidad:
                     raise _VentaRechazada(
-                        f"Stock insuficiente de '{nombre_producto}'. Solo quedan {stock_actual} unidades."
+                        f"Stock insuficiente de '{nombre_producto}'. Solo quedan {formatear_numero(stock_actual)} unidades."
                     )
 
                 cursor.execute(
@@ -412,7 +412,10 @@ def registrar_entrada(id_producto, cantidad):
             cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, id_producto))
             _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, "Entrada")
 
-        return True, f"Entrada registrada: +{cantidad} de '{nombre_producto}'. Stock nuevo: {stock_actual + cantidad}."
+        return True, (
+            f"Entrada registrada: {formatear_cambio(cantidad)} de '{nombre_producto}'. "
+            f"Stock nuevo: {formatear_numero(stock_actual + cantidad)}."
+        )
     finally:
         conexion.close()
 
