@@ -2,7 +2,10 @@ import math
 import os
 import sys
 import sqlite3
+import unicodedata
 from datetime import datetime
+
+from formato import formatear_precio
 
 def _ruta_db():
     """
@@ -104,6 +107,19 @@ def _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, motivo
         VALUES (?, ?, ?, ?, ?)
     """, (id_producto, nombre_producto, cantidad, fecha_actual, motivo))
 
+def validar_producto(precio, stock):
+    """Retorna un mensaje de error si el precio o el stock no son válidos, o None si están bien."""
+    if not math.isfinite(precio) or precio <= 0:
+        return "El precio debe ser mayor a 0."
+    if stock < 0:
+        return "El stock no puede ser negativo."
+    return None
+
+def _sin_tildes(texto):
+    """'Jabón LÁCTEO' -> 'jabon lacteo', para buscar sin importar tildes ni mayúsculas."""
+    descompuesto = unicodedata.normalize("NFD", texto.casefold())
+    return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+
 def categoria_es_nueva(categoria):
     """True si no hay ningún producto con esa categoría (sin importar mayúsculas)."""
     return all(c.casefold() != categoria.casefold() for c in obtener_categorias())
@@ -111,10 +127,9 @@ def categoria_es_nueva(categoria):
 def agregar_producto(nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
     con stock 0 (por ejemplo, uno que todavía no ha llegado)."""
-    if not math.isfinite(precio) or precio <= 0:
-        return False, "El precio debe ser mayor a 0."
-    if stock < 0:
-        return False, "El stock no puede ser negativo."
+    error = validar_producto(precio, stock)
+    if error:
+        return False, error
 
     conexion = conectar()
     try:
@@ -133,13 +148,11 @@ def agregar_producto(nombre, categoria, precio, stock):
 
 def buscar_productos(texto="", categoria=None, stock_menor_a=None):
     """
-    Filtra productos por nombre (texto parcial), categoría exacta y/o stock
-    menor a un valor. Los filtros vacíos o None se ignoran.
+    Filtra productos por nombre (texto parcial, sin importar tildes ni
+    mayúsculas), categoría exacta y/o stock menor a un valor. Los filtros
+    vacíos o None se ignoran.
     """
     condiciones, parametros = [], []
-    if texto:
-        condiciones.append("nombre LIKE ?")
-        parametros.append(f"%{texto}%")
     if categoria:
         condiciones.append("categoria = ?")
         parametros.append(categoria)
@@ -155,9 +168,16 @@ def buscar_productos(texto="", categoria=None, stock_menor_a=None):
     try:
         cursor = conexion.cursor()
         cursor.execute(consulta, parametros)
-        return cursor.fetchall()
+        productos = cursor.fetchall()
     finally:
         conexion.close()
+
+    # El LIKE de SQLite no ignora tildes ni mayúsculas en letras como 'Á',
+    # así que el filtro por nombre se hace aquí
+    if texto:
+        buscado = _sin_tildes(texto)
+        productos = [p for p in productos if buscado in _sin_tildes(p[1])]
+    return productos
 
 def obtener_categorias():
     """Retorna la lista de categorías distintas, en orden alfabético."""
@@ -172,10 +192,9 @@ def obtener_categorias():
 def actualizar_producto(id_producto, nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str). El stock puede quedar en 0 (agotado),
     pero nunca negativo, y el precio siempre debe ser mayor a 0."""
-    if not math.isfinite(precio) or precio <= 0:
-        return False, "El precio debe ser mayor a 0."
-    if stock < 0:
-        return False, "El stock no puede ser negativo."
+    error = validar_producto(precio, stock)
+    if error:
+        return False, error
 
     conexion = conectar()
     try:
@@ -284,7 +303,7 @@ def registrar_venta_carrito(items):
                     VALUES (?, ?, ?, ?, ?)
                 """, (id_producto, nombre_producto, cantidad, total, fecha_actual))
 
-        return True, f"Venta realizada. Total: ${total_venta:,.2f}"
+        return True, f"Venta realizada. Total: {formatear_precio(total_venta)}"
     except _VentaRechazada as rechazo:
         return False, str(rechazo)
     finally:
@@ -351,7 +370,7 @@ def anular_ventas(ids_venta):
 
         cantidad_lineas = len(ids_venta)
         return True, (
-            f"Se anularon {cantidad_lineas} línea(s) de venta por ${total_devuelto:,.2f}. "
+            f"Se anularon {cantidad_lineas} línea(s) de venta por {formatear_precio(total_devuelto)}. "
             "Las unidades volvieron al stock."
         )
     except _VentaRechazada as rechazo:

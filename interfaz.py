@@ -5,6 +5,7 @@ from functools import wraps
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import base_datos as db
+from formato import formatear_precio, leer_precio
 
 
 def manejar_errores_bd(func):
@@ -251,11 +252,10 @@ class AplicacionInventario(ctk.CTk):
         for item in self.tabla.get_children():
             self.tabla.delete(item)
 
-        for prod in lista_productos:
-            if prod[4] < STOCK_BAJO:
-                self.tabla.insert("", "end", values=prod, tags=("stock_bajo",))
-            else:
-                self.tabla.insert("", "end", values=prod)
+        for id_producto, nombre, categoria, precio, stock in lista_productos:
+            valores = (id_producto, nombre, categoria, formatear_precio(precio), stock)
+            etiquetas = ("stock_bajo",) if stock < STOCK_BAJO else ()
+            self.tabla.insert("", "end", values=valores, tags=etiquetas)
 
     def actualizar_menu_categorias(self):
         """Mantiene el menú de categorías al día con los productos existentes."""
@@ -274,7 +274,7 @@ class AplicacionInventario(ctk.CTk):
         ).grid(row=0, column=0, padx=10, pady=(6, 4), sticky="w")
 
         self.lbl_total_carrito = ctk.CTkLabel(
-            self.frame_carrito, text="Total: $0.00", font=ctk.CTkFont(size=16, weight="bold")
+            self.frame_carrito, text="Total: $0", font=ctk.CTkFont(size=16, weight="bold")
         )
         self.lbl_total_carrito.grid(row=0, column=1, padx=10, pady=(6, 4), sticky="e")
 
@@ -327,8 +327,10 @@ class AplicacionInventario(ctk.CTk):
 
         filas = [(self.tabla.set(k, columna), k) for k in self.tabla.get_children("")]
 
-        if columna in ("precio", "stock", "id"):
-            filas.sort(key=lambda x: float(x[0]), reverse=not self.orden_ascendente)
+        if columna == "precio":
+            filas.sort(key=lambda x: leer_precio(x[0]), reverse=not self.orden_ascendente)
+        elif columna in ("stock", "id"):
+            filas.sort(key=lambda x: int(x[0]), reverse=not self.orden_ascendente)
         else:
             filas.sort(key=lambda x: x[0].lower(), reverse=not self.orden_ascendente)
 
@@ -352,7 +354,7 @@ class AplicacionInventario(ctk.CTk):
         self.entry_categoria.insert(0, valores[2])
 
         self.entry_precio.delete(0, "end")
-        self.entry_precio.insert(0, valores[3])
+        self.entry_precio.insert(0, valores[3].lstrip("$"))
 
         self.entry_stock.delete(0, "end")
         self.entry_stock.insert(0, valores[4])
@@ -371,10 +373,19 @@ class AplicacionInventario(ctk.CTk):
             return
 
         try:
-            precio = float(precio_str)
+            precio = leer_precio(precio_str)
             stock = int(stock_str)
         except ValueError:
-            messagebox.showerror("Dato Inválido", "El precio debe ser un número decimal y el stock un entero.")
+            messagebox.showerror(
+                "Dato Inválido",
+                "El precio debe ser un número (ej: 1500, 1.500 o 1.500,50) y el stock un número entero."
+            )
+            return
+
+        # Validar antes de preguntar por la categoría, para no preguntar en vano
+        error = db.validar_producto(precio, stock)
+        if error:
+            messagebox.showerror("Dato Inválido", error)
             return
 
         if db.categoria_es_nueva(categoria) and not messagebox.askyesno(
@@ -448,9 +459,9 @@ class AplicacionInventario(ctk.CTk):
             total += subtotal
             self.tabla_carrito.insert(
                 "", "end", iid=str(id_producto),
-                values=(linea["nombre"], linea["cantidad"], f"{linea['precio']:,.2f}", f"{subtotal:,.2f}")
+                values=(linea["nombre"], linea["cantidad"], formatear_precio(linea["precio"]), formatear_precio(subtotal))
             )
-        self.lbl_total_carrito.configure(text=f"Total: ${total:,.2f}")
+        self.lbl_total_carrito.configure(text=f"Total: {formatear_precio(total)}")
 
     def refrescar_carrito(self):
         """
@@ -467,7 +478,7 @@ class AplicacionInventario(ctk.CTk):
                 continue
             _, nombre, _, precio, _ = producto
             if precio != linea["precio"]:
-                cambios.append(f"'{nombre}': precio ${linea['precio']:,.2f} → ${precio:,.2f}")
+                cambios.append(f"'{nombre}': precio {formatear_precio(linea['precio'])} → {formatear_precio(precio)}")
             linea["nombre"], linea["precio"] = nombre, precio
         self.actualizar_carrito()
         return cambios
@@ -502,7 +513,7 @@ class AplicacionInventario(ctk.CTk):
                 "Carrito Actualizado",
                 "Algunos productos cambiaron desde que se agregaron:\n\n"
                 + "\n".join(cambios)
-                + f"\n\nNuevo total: ${total:,.2f}\n¿Cobrar la venta?"
+                + f"\n\nNuevo total: {formatear_precio(total)}\n¿Cobrar la venta?"
             ):
                 return
 
@@ -584,18 +595,26 @@ class AplicacionInventario(ctk.CTk):
             cargar_ventas()
 
         def cargar_ventas():
-            desde = entry_desde.get().strip() or None
-            hasta = entry_hasta.get().strip() or None
-            for fecha in (desde, hasta):
-                if fecha:
-                    try:
-                        datetime.strptime(fecha, "%Y-%m-%d")
-                    except ValueError:
-                        messagebox.showerror(
-                            "Fecha Inválida", f"'{fecha}' no es una fecha válida. Usa el formato AAAA-MM-DD.",
-                            parent=ventana_ventas
-                        )
-                        return
+            fechas = []
+            for entry in (entry_desde, entry_hasta):
+                texto = entry.get().strip()
+                if not texto:
+                    fechas.append(None)
+                    continue
+                try:
+                    # Se reescribe con ceros (2026-9-1 -> 2026-09-01), porque la
+                    # base de datos compara las fechas como texto
+                    fecha = datetime.strptime(texto, "%Y-%m-%d").strftime("%Y-%m-%d")
+                except ValueError:
+                    messagebox.showerror(
+                        "Fecha Inválida", f"'{texto}' no es una fecha válida. Usa el formato AAAA-MM-DD.",
+                        parent=ventana_ventas
+                    )
+                    return
+                entry.delete(0, "end")
+                entry.insert(0, fecha)
+                fechas.append(fecha)
+            desde, hasta = fechas
             if desde and hasta and desde > hasta:
                 messagebox.showerror(
                     "Rango Inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.", parent=ventana_ventas
@@ -622,14 +641,14 @@ class AplicacionInventario(ctk.CTk):
                 if anulada:
                     tabla_ventas.insert(
                         "", "end", iid=str(id_venta), tags=("anulada",),
-                        values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha, "Anulada")
+                        values=(id_venta, nombre_prod, cant, formatear_precio(total), fecha, "Anulada")
                     )
                 else:
                     dinero_total += total
                     lineas_validas += 1
                     tabla_ventas.insert(
                         "", "end", iid=str(id_venta),
-                        values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha, "OK")
+                        values=(id_venta, nombre_prod, cant, formatear_precio(total), fecha, "OK")
                     )
 
             if desde or hasta:
@@ -637,7 +656,7 @@ class AplicacionInventario(ctk.CTk):
             else:
                 periodo = "todo el historial"
             lbl_total_acumulado.configure(
-                text=f"Total Recaudado ({periodo}): ${dinero_total:,.2f}  ·  {lineas_validas} líneas de venta"
+                text=f"Total Recaudado ({periodo}): {formatear_precio(dinero_total)}  ·  {lineas_validas} líneas de venta"
             )
 
         def anular_seleccionadas():
@@ -813,6 +832,9 @@ class AplicacionInventario(ctk.CTk):
             if exito:
                 self.limpiar_formulario()
                 self.cargar_productos_en_tabla()
+                cambios = self.refrescar_carrito()
+                if cambios:
+                    messagebox.showinfo("Carrito Actualizado", "\n".join(cambios))
             else:
                 messagebox.showerror("No se pudo eliminar", mensaje)
 
