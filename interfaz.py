@@ -540,8 +540,8 @@ class AplicacionInventario(ctk.CTk):
             return
 
         cambios = self.refrescar_carrito()
+        total = sum(linea["cantidad"] * linea["precio"] for linea in self.carrito.values())
         if cambios:
-            total = sum(linea["cantidad"] * linea["precio"] for linea in self.carrito.values())
             if not self.carrito:
                 messagebox.showwarning("Carrito Actualizado", "\n".join(cambios))
                 return
@@ -553,11 +553,18 @@ class AplicacionInventario(ctk.CTk):
             ):
                 return
 
+        pago = self.pedir_pago(total)
+        if pago is None:
+            return
+
         items = [(id_producto, linea["cantidad"]) for id_producto, linea in self.carrito.items()]
         exito, mensaje = db.registrar_venta_carrito(items)
 
         if exito:
-            messagebox.showinfo("Venta Realizada", mensaje)
+            messagebox.showinfo(
+                "Venta Realizada",
+                f"{mensaje}\n\nRecibido: {formatear_precio(pago)}\nCambio: {formatear_precio(pago - total)}"
+            )
             self.carrito.clear()
             self.actualizar_carrito()
             self.limpiar_formulario()
@@ -565,11 +572,106 @@ class AplicacionInventario(ctk.CTk):
         else:
             messagebox.showerror("Error en Venta", mensaje)
 
+    def pedir_pago(self, total):
+        """
+        Ventana para escribir con cuánto paga el cliente; muestra el cambio
+        mientras se escribe. Retorna el dinero recibido, o None si se cancela.
+        """
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Cobrar Venta")
+        ventana.geometry("380x300")
+        ventana.resizable(False, False)
+        ventana.transient(self)
+        ventana.grab_set()
+        resultado = {"pago": None}
+
+        ctk.CTkLabel(ventana, text="Total a cobrar", font=ctk.CTkFont(size=14)).pack(pady=(16, 0))
+        ctk.CTkLabel(
+            ventana, text=formatear_precio(total), font=ctk.CTkFont(size=28, weight="bold")
+        ).pack()
+
+        entry_pago = ctk.CTkEntry(
+            ventana, width=220, placeholder_text="Paga con ($)", font=ctk.CTkFont(size=16), justify="center"
+        )
+        entry_pago.pack(pady=(14, 6))
+
+        lbl_cambio = ctk.CTkLabel(ventana, text="Cambio: —", font=ctk.CTkFont(size=18, weight="bold"))
+        lbl_cambio.pack(pady=4)
+        color_normal = lbl_cambio.cget("text_color")
+
+        def leer_pago():
+            """El monto escrito, o None si está vacío o no es un número."""
+            try:
+                return leer_precio(entry_pago.get().strip())
+            except ValueError:
+                return None
+
+        def actualizar_cambio(_evento=None):
+            pago = leer_pago()
+            if pago is None:
+                lbl_cambio.configure(text="Cambio: —", text_color=color_normal)
+            elif round(pago, 2) < round(total, 2):
+                lbl_cambio.configure(
+                    text=f"Faltan {formatear_precio(total - pago)}", text_color=("#C62828", "#EF5350")
+                )
+            else:
+                lbl_cambio.configure(
+                    text=f"Cambio: {formatear_precio(pago - total)}", text_color=("#2E7D32", "#66BB6A")
+                )
+
+        def confirmar(_evento=None):
+            if not entry_pago.get().strip():
+                messagebox.showwarning("Pago Vacío", "Escribe con cuánto paga el cliente.", parent=ventana)
+                return
+            pago = leer_pago()
+            if pago is None:
+                messagebox.showerror(
+                    "Dato Inválido", "El pago debe ser un número (ej: 20000 o 20.000).", parent=ventana
+                )
+                return
+            if round(pago, 2) < round(total, 2):
+                messagebox.showerror(
+                    "Pago Insuficiente", f"Faltan {formatear_precio(total - pago)} para completar el pago.",
+                    parent=ventana
+                )
+                return
+            resultado["pago"] = pago
+            ventana.destroy()
+
+        def pago_exacto():
+            entry_pago.delete(0, "end")
+            entry_pago.insert(0, formatear_numero(total))
+            confirmar()
+
+        frame_botones = ctk.CTkFrame(ventana, fg_color="transparent")
+        frame_botones.pack(pady=(14, 10))
+        ctk.CTkButton(
+            frame_botones, text="Cancelar", width=100, font=ctk.CTkFont(size=13),
+            fg_color="#555555", hover_color="#333333", command=ventana.destroy
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            frame_botones, text="Pago exacto", width=110, font=ctk.CTkFont(size=13),
+            fg_color="#00838F", hover_color="#005662", command=pago_exacto
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            frame_botones, text="💵 Cobrar", width=110, font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2E7D32", hover_color="#1B5E20", command=confirmar
+        ).pack(side="left", padx=4)
+
+        entry_pago.bind("<KeyRelease>", actualizar_cambio)
+        entry_pago.bind("<Return>", confirmar)
+        ventana.bind("<Escape>", lambda _evento: ventana.destroy())
+        ventana.after(150, entry_pago.focus_set)
+
+        # Esperar a que se cierre la ventana antes de seguir con la venta
+        self.wait_window(ventana)
+        return resultado["pago"]
+
     @manejar_errores_bd
     def abrir_ventana_ventas(self):
         ventana_ventas = ctk.CTkToplevel(self)
         ventana_ventas.title("Historial de Ventas")
-        ventana_ventas.geometry("820x560")
+        ventana_ventas.geometry("820x600")
         ventana_ventas.grab_set()
 
         lbl_titulo = ctk.CTkLabel(
