@@ -1,38 +1,17 @@
-import os
-import sqlite3
-from datetime import date, datetime, timedelta
-from functools import wraps
-
 import customtkinter as ctk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
+
 import base_datos as db
-from formato import (
-    describir_periodo, formatear_cambio, formatear_numero, formatear_precio, leer_entero, leer_precio
-)
-
-
-def manejar_errores_bd(func):
-    """Evita que un error inesperado de la base de datos (archivo bloqueado,
-    permisos, etc.) cierre la aplicación sin explicación: muestra un aviso
-    claro en su lugar."""
-    @wraps(func)
-    def envoltorio(self, *args, **kwargs):
-        try:
-            return func(self, *args, **kwargs)
-        except (sqlite3.Error, OSError) as error:
-            messagebox.showerror(
-                "Error de Base de Datos",
-                f"Ocurrió un problema al acceder a la base de datos:\n{error}"
-            )
-    return envoltorio
-
-# Los productos con menos unidades que esto se marcan en rojo
-STOCK_BAJO = 5
+from componentes import STOCK_BAJO, manejar_errores_bd
+from formato import formatear_numero, formatear_precio, leer_entero, leer_precio
+from ventana_entradas import VentanaEntradas
+from ventana_pago import pedir_pago
+from ventana_ventas import VentanaVentas
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-         
+
 class AplicacionInventario(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -474,17 +453,18 @@ class AplicacionInventario(ctk.CTk):
             self.cargar_productos_en_tabla()
             return
 
-        id_producto, nombre, _, precio, stock = producto
-        en_carrito = self.carrito.get(id_producto, {}).get("cantidad", 0)
-        if en_carrito + cantidad > stock:
+        en_carrito = self.carrito.get(producto["id"], {}).get("cantidad", 0)
+        if en_carrito + cantidad > producto["stock"]:
             messagebox.showerror(
                 "Stock Insuficiente",
-                f"Solo quedan {formatear_numero(stock)} unidades de '{nombre}' "
+                f"Solo quedan {formatear_numero(producto['stock'])} unidades de '{producto['nombre']}' "
                 f"y ya hay {formatear_numero(en_carrito)} en el carrito."
             )
             return
 
-        self.carrito[id_producto] = {"nombre": nombre, "precio": precio, "cantidad": en_carrito + cantidad}
+        self.carrito[producto["id"]] = {
+            "nombre": producto["nombre"], "precio": producto["precio"], "cantidad": en_carrito + cantidad
+        }
         self.actualizar_carrito()
         self.limpiar_formulario()
 
@@ -515,10 +495,12 @@ class AplicacionInventario(ctk.CTk):
                 cambios.append(f"'{linea['nombre']}' ya no existe y se quitó del carrito.")
                 del self.carrito[id_producto]
                 continue
-            _, nombre, _, precio, _ = producto
-            if precio != linea["precio"]:
-                cambios.append(f"'{nombre}': precio {formatear_precio(linea['precio'])} → {formatear_precio(precio)}")
-            linea["nombre"], linea["precio"] = nombre, precio
+            if producto["precio"] != linea["precio"]:
+                cambios.append(
+                    f"'{producto['nombre']}': precio {formatear_precio(linea['precio'])} → "
+                    f"{formatear_precio(producto['precio'])}"
+                )
+            linea["nombre"], linea["precio"] = producto["nombre"], producto["precio"]
         self.actualizar_carrito()
         return cambios
 
@@ -556,7 +538,7 @@ class AplicacionInventario(ctk.CTk):
             ):
                 return
 
-        pago = self.pedir_pago(total)
+        pago = pedir_pago(self, total)
         if pago is None:
             return
 
@@ -575,501 +557,24 @@ class AplicacionInventario(ctk.CTk):
         else:
             messagebox.showerror("Error en Venta", mensaje)
 
-    def pedir_pago(self, total):
-        """
-        Ventana para escribir con cuánto paga el cliente; muestra el cambio
-        mientras se escribe. Retorna el dinero recibido, o None si se cancela.
-        """
-        ventana = ctk.CTkToplevel(self)
-        ventana.title("Cobrar Venta")
-        ventana.geometry("380x300")
-        ventana.resizable(False, False)
-        ventana.transient(self)
-        ventana.grab_set()
-        resultado = {"pago": None}
-
-        ctk.CTkLabel(ventana, text="Total a cobrar", font=ctk.CTkFont(size=14)).pack(pady=(16, 0))
-        ctk.CTkLabel(
-            ventana, text=formatear_precio(total), font=ctk.CTkFont(size=28, weight="bold")
-        ).pack()
-
-        entry_pago = ctk.CTkEntry(
-            ventana, width=220, placeholder_text="Paga con ($)", font=ctk.CTkFont(size=16), justify="center"
-        )
-        entry_pago.pack(pady=(14, 6))
-
-        lbl_cambio = ctk.CTkLabel(ventana, text="Cambio: —", font=ctk.CTkFont(size=18, weight="bold"))
-        lbl_cambio.pack(pady=4)
-        color_normal = lbl_cambio.cget("text_color")
-
-        def leer_pago():
-            """El monto escrito, o None si está vacío o no es un número."""
-            try:
-                return leer_precio(entry_pago.get().strip())
-            except ValueError:
-                return None
-
-        def actualizar_cambio(_evento=None):
-            pago = leer_pago()
-            if pago is None:
-                lbl_cambio.configure(text="Cambio: —", text_color=color_normal)
-            elif round(pago, 2) < round(total, 2):
-                lbl_cambio.configure(
-                    text=f"Faltan {formatear_precio(total - pago)}", text_color=("#C62828", "#EF5350")
-                )
-            else:
-                lbl_cambio.configure(
-                    text=f"Cambio: {formatear_precio(pago - total)}", text_color=("#2E7D32", "#66BB6A")
-                )
-
-        def confirmar(_evento=None):
-            if not entry_pago.get().strip():
-                messagebox.showwarning("Pago Vacío", "Escribe con cuánto paga el cliente.", parent=ventana)
-                return
-            pago = leer_pago()
-            if pago is None:
-                messagebox.showerror(
-                    "Dato Inválido", "El pago debe ser un número (ej: 20000 o 20.000).", parent=ventana
-                )
-                return
-            if round(pago, 2) < round(total, 2):
-                messagebox.showerror(
-                    "Pago Insuficiente", f"Faltan {formatear_precio(total - pago)} para completar el pago.",
-                    parent=ventana
-                )
-                return
-            resultado["pago"] = pago
-            ventana.destroy()
-
-        def pago_exacto():
-            entry_pago.delete(0, "end")
-            entry_pago.insert(0, formatear_numero(total))
-            confirmar()
-
-        frame_botones = ctk.CTkFrame(ventana, fg_color="transparent")
-        frame_botones.pack(pady=(14, 10))
-        ctk.CTkButton(
-            frame_botones, text="Cancelar", width=100, font=ctk.CTkFont(size=13),
-            fg_color="#555555", hover_color="#333333", command=ventana.destroy
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            frame_botones, text="Pago exacto", width=110, font=ctk.CTkFont(size=13),
-            fg_color="#00838F", hover_color="#005662", command=pago_exacto
-        ).pack(side="left", padx=4)
-        ctk.CTkButton(
-            frame_botones, text="💵 Cobrar", width=110, font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color="#2E7D32", hover_color="#1B5E20", command=confirmar
-        ).pack(side="left", padx=4)
-
-        entry_pago.bind("<KeyRelease>", actualizar_cambio)
-        entry_pago.bind("<Return>", confirmar)
-        ventana.bind("<Escape>", lambda _evento: ventana.destroy())
-        ventana.after(150, entry_pago.focus_set)
-
-        # Esperar a que se cierre la ventana antes de seguir con la venta
-        self.wait_window(ventana)
-        return resultado["pago"]
-
     @manejar_errores_bd
     def abrir_ventana_ventas(self):
-        ventana_ventas = ctk.CTkToplevel(self)
-        ventana_ventas.title("Historial de Ventas")
-        ventana_ventas.geometry("820x640")
-        ventana_ventas.grab_set()
-
-        lbl_titulo = ctk.CTkLabel(
-            ventana_ventas, text="📜 Historial de Transacciones", font=ctk.CTkFont(size=18, weight="bold")
-        )
-        lbl_titulo.pack(pady=10)
-
-        # Filtros de fecha
-        frame_filtros = ctk.CTkFrame(ventana_ventas, fg_color="transparent")
-        frame_filtros.pack(fill="x", padx=15)
-
-        ctk.CTkLabel(frame_filtros, text="Desde:", font=ctk.CTkFont(size=13)).pack(side="left")
-        entry_desde = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
-        entry_desde.pack(side="left", padx=(4, 10))
-        ctk.CTkLabel(frame_filtros, text="Hasta:", font=ctk.CTkFont(size=13)).pack(side="left")
-        entry_hasta = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
-        entry_hasta.pack(side="left", padx=(4, 10))
-
-        # Período que se está mostrando; es el que se exporta a Excel
-        rango_actual = {"desde": None, "hasta": None}
-
-        # Dos pestañas que comparten los filtros de fecha
-        pestanas = ctk.CTkTabview(ventana_ventas)
-        pestanas.pack(fill="both", expand=True, padx=15, pady=(4, 10))
-        tab_ventas = pestanas.add("Ventas")
-        tab_ranking = pestanas.add("🏆 Más vendidos")
-
-        frame_tabla = ctk.CTkFrame(tab_ventas)
-        frame_tabla.pack(fill="both", expand=True, pady=(0, 8))
-
-        columnas = ("id", "producto", "cantidad", "total", "fecha", "estado")
-        tabla_ventas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
-        tabla_ventas.tag_configure("anulada", foreground="#888888")
-
-        tabla_ventas.heading("id", text="ID Venta")
-        tabla_ventas.heading("producto", text="Producto")
-        tabla_ventas.heading("cantidad", text="Cant.")
-        tabla_ventas.heading("total", text="Total ($)")
-        tabla_ventas.heading("fecha", text="Fecha y Hora")
-        tabla_ventas.heading("estado", text="Estado")
-
-        tabla_ventas.column("id", width=60, anchor="center")
-        tabla_ventas.column("producto", width=180)
-        tabla_ventas.column("cantidad", width=60, anchor="center")
-        tabla_ventas.column("total", width=90, anchor="e")
-        tabla_ventas.column("fecha", width=160, anchor="center")
-        tabla_ventas.column("estado", width=90, anchor="center")
-
-        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=tabla_ventas.yview)
-        tabla_ventas.configure(yscroll=scrollbar.set)
-
-        tabla_ventas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        lbl_total_acumulado = ctk.CTkLabel(
-            tab_ventas, 
-            text="", 
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color="#2E7D32"
-        )
-        lbl_total_acumulado.pack(pady=(0, 4))
-
-        # Pestaña de productos más vendidos
-        frame_ranking = ctk.CTkFrame(tab_ranking)
-        frame_ranking.pack(fill="both", expand=True, pady=(0, 8))
-
-        columnas_ranking = ("puesto", "producto", "unidades", "total", "porcentaje")
-        tabla_ranking = ttk.Treeview(frame_ranking, columns=columnas_ranking, show="headings")
-        tabla_ranking.heading("puesto", text="#")
-        tabla_ranking.heading("producto", text="Producto")
-        tabla_ranking.heading("unidades", text="Unidades Vendidas")
-        tabla_ranking.heading("total", text="Total ($)")
-        tabla_ranking.heading("porcentaje", text="% de lo Vendido")
-        # Las columnas de números no se encogen, para que sus títulos no se corten;
-        # si la ventana cambia de tamaño, la que se ajusta es la de Producto
-        tabla_ranking.column("puesto", width=40, minwidth=40, stretch=False, anchor="center")
-        tabla_ranking.column("producto", width=200, minwidth=120)
-        tabla_ranking.column("unidades", width=195, minwidth=195, stretch=False, anchor="center")
-        tabla_ranking.column("total", width=110, minwidth=110, stretch=False, anchor="e")
-        tabla_ranking.column("porcentaje", width=175, minwidth=175, stretch=False, anchor="center")
-
-        scrollbar_ranking = ttk.Scrollbar(frame_ranking, orient="vertical", command=tabla_ranking.yview)
-        tabla_ranking.configure(yscroll=scrollbar_ranking.set)
-        tabla_ranking.pack(side="left", fill="both", expand=True)
-        scrollbar_ranking.pack(side="right", fill="y")
-
-        lbl_resumen_ranking = ctk.CTkLabel(tab_ranking, text="", font=ctk.CTkFont(size=15, weight="bold"))
-        lbl_resumen_ranking.pack(pady=(0, 4))
-
-        def poner_fechas(desde, hasta):
-            for entry, valor in ((entry_desde, desde), (entry_hasta, hasta)):
-                entry.delete(0, "end")
-                if valor:
-                    entry.insert(0, valor.strftime("%Y-%m-%d"))
-            cargar_ventas()
-
-        def cargar_ventas():
-            fechas = []
-            for entry in (entry_desde, entry_hasta):
-                texto = entry.get().strip()
-                if not texto:
-                    fechas.append(None)
-                    continue
-                try:
-                    # Se reescribe con ceros (2026-9-1 -> 2026-09-01), porque la
-                    # base de datos compara las fechas como texto
-                    fecha = datetime.strptime(texto, "%Y-%m-%d").strftime("%Y-%m-%d")
-                except ValueError:
-                    messagebox.showerror(
-                        "Fecha Inválida", f"'{texto}' no es una fecha válida. Usa el formato AAAA-MM-DD.",
-                        parent=ventana_ventas
-                    )
-                    return
-                entry.delete(0, "end")
-                entry.insert(0, fecha)
-                fechas.append(fecha)
-            desde, hasta = fechas
-            if desde and hasta and desde > hasta:
-                messagebox.showerror(
-                    "Rango Inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.", parent=ventana_ventas
-                )
-                return
-
-            for tabla in (tabla_ventas, tabla_ranking):
-                for item in tabla.get_children():
-                    tabla.delete(item)
-
-            try:
-                ventas = db.obtener_ventas(desde, hasta)
-                ranking = db.obtener_mas_vendidos(desde, hasta)
-            except (sqlite3.Error, OSError) as error:
-                messagebox.showerror(
-                    "Error de Base de Datos",
-                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
-                    parent=ventana_ventas
-                )
-                return
-            rango_actual["desde"], rango_actual["hasta"] = desde, hasta
-
-            dinero_total = 0.0
-            lineas_validas = 0
-            for v in ventas:
-                id_venta, prod_id, nombre_prod, cant, total, fecha, anulada = v
-                if anulada:
-                    tabla_ventas.insert(
-                        "", "end", iid=str(id_venta), tags=("anulada",),
-                        values=(id_venta, nombre_prod, formatear_numero(cant), formatear_precio(total), fecha, "Anulada")
-                    )
-                else:
-                    dinero_total += total
-                    lineas_validas += 1
-                    tabla_ventas.insert(
-                        "", "end", iid=str(id_venta),
-                        values=(id_venta, nombre_prod, formatear_numero(cant), formatear_precio(total), fecha, "OK")
-                    )
-
-            periodo = describir_periodo(desde, hasta)
-            lbl_total_acumulado.configure(
-                text=f"Total Recaudado ({periodo}): {formatear_precio(dinero_total)}  ·  {lineas_validas} líneas de venta"
-            )
-
-            total_ranking = sum(total for _, _, total in ranking)
-            for puesto, (nombre_prod, unidades, total) in enumerate(ranking, start=1):
-                porcentaje = f"{total / total_ranking * 100:.1f} %".replace(".", ",") if total_ranking else "—"
-                tabla_ranking.insert(
-                    "", "end",
-                    values=(puesto, nombre_prod, formatear_numero(unidades), formatear_precio(total), porcentaje)
-                )
-            if ranking:
-                lbl_resumen_ranking.configure(
-                    text=f"{len(ranking)} producto(s) vendidos ({periodo})  ·  "
-                         f"Más vendido: {ranking[0][0]} ({formatear_numero(ranking[0][1])} unidades)"
-                )
-            else:
-                lbl_resumen_ranking.configure(text=f"No hay ventas en este período ({periodo}).")
-
-        def anular_seleccionadas():
-            seleccion = tabla_ventas.selection()
-            if not seleccion:
-                messagebox.showwarning(
-                    "Selección Requerida", "Selecciona una o más ventas para anular.", parent=ventana_ventas
-                )
-                return
-            if not messagebox.askyesno(
-                "Confirmar",
-                f"¿Anular {len(seleccion)} línea(s) de venta? Las unidades volverán al stock.",
-                parent=ventana_ventas
-            ):
-                return
-
-            try:
-                exito, mensaje = db.anular_ventas([int(iid) for iid in seleccion])
-            except (sqlite3.Error, OSError) as error:
-                messagebox.showerror(
-                    "Error de Base de Datos",
-                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
-                    parent=ventana_ventas
-                )
-                return
-
-            if exito:
-                messagebox.showinfo("Venta Anulada", mensaje, parent=ventana_ventas)
-                cargar_ventas()
-                self.limpiar_formulario()
-                self.cargar_productos_en_tabla()
-            else:
-                messagebox.showerror("No se pudo anular", mensaje, parent=ventana_ventas)
-
-        def exportar_a_excel():
-            try:
-                # Se importa aquí para que la tienda funcione aunque falte openpyxl
-                import exportar
-            except ImportError:
-                messagebox.showerror(
-                    "Falta una Librería",
-                    "Para exportar a Excel hay que instalar 'openpyxl':\n\nsudo pacman -S python-openpyxl",
-                    parent=ventana_ventas
-                )
-                return
-
-            desde, hasta = rango_actual["desde"], rango_actual["hasta"]
-            if desde or hasta:
-                nombre_sugerido = f"Reporte_Tienda_{desde or 'inicio'}_a_{hasta or date.today()}.xlsx"
-            else:
-                nombre_sugerido = f"Reporte_Tienda_completo_{date.today()}.xlsx"
-            ruta = filedialog.asksaveasfilename(
-                parent=ventana_ventas,
-                title="Guardar reporte de Excel",
-                initialdir=os.path.expanduser("~"),
-                initialfile=nombre_sugerido,
-                defaultextension=".xlsx",
-                filetypes=[("Libro de Excel", "*.xlsx")],
-            )
-            if not ruta:
-                return
-            if not ruta.lower().endswith(".xlsx"):
-                ruta += ".xlsx"
-
-            try:
-                cantidad_ventas, cantidad_productos = exportar.exportar_excel(ruta, desde, hasta, STOCK_BAJO)
-            except PermissionError:
-                messagebox.showerror(
-                    "No se pudo guardar",
-                    "No se pudo escribir el archivo. Si lo tienes abierto en Excel o LibreOffice, "
-                    "ciérralo e inténtalo de nuevo.",
-                    parent=ventana_ventas
-                )
-                return
-            except (sqlite3.Error, OSError) as error:
-                messagebox.showerror("No se pudo exportar", f"Ocurrió un problema:\n{error}", parent=ventana_ventas)
-                return
-
-            messagebox.showinfo(
-                "Reporte Exportado",
-                f"Se guardó el reporte ({describir_periodo(desde, hasta)}):\n{ruta}\n\n"
-                f"Hojas: Ventas ({cantidad_ventas} líneas), Más vendidos e Inventario ({cantidad_productos} productos).",
-                parent=ventana_ventas
-            )
-
-        ctk.CTkButton(
-            ventana_ventas, text="📊 Exportar a Excel", font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color="#2E7D32", hover_color="#1B5E20", command=exportar_a_excel
-        ).pack(before=pestanas, side="bottom", pady=(0, 12))
-
-        ctk.CTkButton(
-            tab_ventas, text="↩ Anular Venta Seleccionada", font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color="#D32F2F", hover_color="#B71C1C", command=anular_seleccionadas
-        ).pack(before=lbl_total_acumulado, pady=(0, 8))
-
-        hoy = date.today()
-        botones_rapidos = (
-            ("Filtrar", cargar_ventas),
-            ("Hoy", lambda: poner_fechas(hoy, hoy)),
-            ("Esta semana", lambda: poner_fechas(hoy - timedelta(days=hoy.weekday()), hoy)),
-            ("Este mes", lambda: poner_fechas(hoy.replace(day=1), hoy)),
-            ("Todo", lambda: poner_fechas(None, None)),
-        )
-        for texto, comando in botones_rapidos:
-            ctk.CTkButton(
-                frame_filtros, text=texto, width=80, font=ctk.CTkFont(size=13), command=comando
-            ).pack(side="left", padx=2)
-
-        for entry in (entry_desde, entry_hasta):
-            entry.bind("<Return>", lambda _evento: cargar_ventas())
-
-        cargar_ventas()
+        VentanaVentas(self, al_anular=self.actualizar_tras_cambio_de_stock)
 
     @manejar_errores_bd
     def abrir_ventana_entradas(self):
         """Registra la llegada de mercancía para el producto seleccionado y muestra el historial de entradas."""
-        ventana = ctk.CTkToplevel(self)
-        ventana.title("Entrada de Mercancía")
-        ventana.geometry("680x500")
-        ventana.grab_set()
-
-        ctk.CTkLabel(
-            ventana, text="📥 Entrada de Mercancía", font=ctk.CTkFont(size=18, weight="bold")
-        ).pack(pady=10)
-
         producto = db.obtener_producto(self.id_producto_seleccionado) if self.id_producto_seleccionado else None
-        if producto:
-            texto_producto = f"Producto: {producto[1]}  ·  Stock actual: {formatear_numero(producto[4])}"
-        else:
-            texto_producto = "Selecciona un producto en la tabla principal para registrar una entrada."
-        lbl_producto = ctk.CTkLabel(ventana, text=texto_producto, font=ctk.CTkFont(size=14))
-        lbl_producto.pack(padx=15)
+        VentanaEntradas(self, producto, al_registrar=self.actualizar_tras_cambio_de_stock)
 
-        frame_registro = ctk.CTkFrame(ventana, fg_color="transparent")
-        frame_registro.pack(pady=8)
-        entry_cantidad = ctk.CTkEntry(
-            frame_registro, width=160, placeholder_text="Unidades recibidas", font=ctk.CTkFont(size=14)
-        )
-        entry_cantidad.pack(side="left", padx=5)
-        btn_registrar = ctk.CTkButton(
-            frame_registro, text="Registrar Entrada", font=ctk.CTkFont(size=14, weight="bold"),
-            fg_color="#00838F", hover_color="#005662"
-        )
-        btn_registrar.pack(side="left", padx=5)
-        if not producto:
-            entry_cantidad.configure(state="disabled")
-            btn_registrar.configure(state="disabled")
-
-        frame_tabla = ctk.CTkFrame(ventana)
-        frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
-
-        ctk.CTkLabel(
-            ventana, text="Movimientos de stock (entradas, stock inicial y ajustes manuales)",
-            font=ctk.CTkFont(size=13)
-        ).pack(padx=15, anchor="w")
-
-        columnas = ("id", "producto", "cantidad", "fecha", "motivo")
-        tabla_entradas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
-        tabla_entradas.heading("id", text="ID")
-        tabla_entradas.heading("producto", text="Producto")
-        tabla_entradas.heading("cantidad", text="Unidades")
-        tabla_entradas.heading("fecha", text="Fecha y Hora")
-        tabla_entradas.heading("motivo", text="Motivo")
-        tabla_entradas.column("id", width=50, anchor="center")
-        tabla_entradas.column("producto", width=200)
-        tabla_entradas.column("cantidad", width=80, anchor="center")
-        tabla_entradas.column("fecha", width=150, anchor="center")
-        tabla_entradas.column("motivo", width=110, anchor="center")
-
-        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=tabla_entradas.yview)
-        tabla_entradas.configure(yscroll=scrollbar.set)
-        tabla_entradas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        def cargar_entradas():
-            for item in tabla_entradas.get_children():
-                tabla_entradas.delete(item)
-            for id_mov, nombre, cantidad, fecha, motivo in db.obtener_entradas():
-                tabla_entradas.insert("", "end", values=(id_mov, nombre, formatear_cambio(cantidad), fecha, motivo))
-
-        def registrar():
-            cant_str = entry_cantidad.get().strip()
-            try:
-                cantidad = leer_entero(cant_str)
-                if cantidad <= 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showerror(
-                    "Error", "La cantidad debe ser un número entero positivo.", parent=ventana
-                )
-                return
-
-            try:
-                exito, mensaje = db.registrar_entrada(producto[0], cantidad)
-                if exito:
-                    cargar_entradas()
-                    # El formulario tendría el stock anterior: se limpia para no sobrescribirlo
-                    self.limpiar_formulario()
-                    self.cargar_productos_en_tabla()
-                    actualizado = db.obtener_producto(producto[0])
-            except (sqlite3.Error, OSError) as error:
-                messagebox.showerror(
-                    "Error de Base de Datos",
-                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
-                    parent=ventana
-                )
-                return
-
-            if exito:
-                entry_cantidad.delete(0, "end")
-                lbl_producto.configure(
-                    text=f"Producto: {actualizado[1]}  ·  Stock actual: {formatear_numero(actualizado[4])}"
-                )
-                messagebox.showinfo("Entrada Registrada", mensaje, parent=ventana)
-            else:
-                messagebox.showerror("Error", mensaje, parent=ventana)
-
-        btn_registrar.configure(command=registrar)
-        if producto:
-            entry_cantidad.bind("<Return>", lambda _evento: registrar())
-        cargar_entradas()
+    def actualizar_tras_cambio_de_stock(self):
+        """
+        Otra ventana cambió el stock (anuló una venta o registró una entrada).
+        El formulario tendría el stock anterior, así que se limpia para no
+        sobrescribirlo, y la tabla se recarga.
+        """
+        self.limpiar_formulario()
+        self.cargar_productos_en_tabla()
 
     @manejar_errores_bd
     def eliminar_producto(self):

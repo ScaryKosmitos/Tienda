@@ -25,8 +25,13 @@ def _ruta_db():
     return os.path.join(carpeta, "inventario.db")
 
 def conectar():
-    """Establece conexión con la base de datos SQLite y activa las claves foráneas."""
+    """
+    Establece conexión con la base de datos SQLite y activa las claves foráneas.
+    Las filas se pueden leer por posición (producto[4]) o por nombre de
+    columna (producto["stock"]), que es más fácil de entender.
+    """
     conexion = sqlite3.connect(_ruta_db())
+    conexion.row_factory = sqlite3.Row
     conexion.execute("PRAGMA foreign_keys = ON")
     return conexion
 
@@ -258,7 +263,7 @@ class _VentaRechazada(Exception):
 
 
 def obtener_producto(id_producto):
-    """Retorna (id, nombre, categoria, precio, stock) o None si no existe."""
+    """Retorna el producto (columnas id, nombre, categoria, precio, stock) o None si no existe."""
     conexion = conectar()
     try:
         cursor = conexion.cursor()
@@ -353,7 +358,7 @@ def obtener_ventas(desde=None, hasta=None):
 def obtener_mas_vendidos(desde=None, hasta=None):
     """
     Ranking de productos por unidades vendidas (sin contar ventas anuladas),
-    como (nombre, unidades, total_recaudado), de más a menos vendido.
+    con las columnas nombre, unidades y total, de más a menos vendido.
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
     condiciones, parametros = _filtro_fechas(desde, hasta)
@@ -362,11 +367,12 @@ def obtener_mas_vendidos(desde=None, hasta=None):
     # Se usa el nombre actual del producto, para que una venta hecha antes de
     # renombrarlo se sume en la misma fila
     consulta = f"""
-        SELECT COALESCE(p.nombre, MAX(v.nombre_producto)), SUM(v.cantidad), SUM(v.total)
+        SELECT COALESCE(p.nombre, MAX(v.nombre_producto)) AS nombre,
+               SUM(v.cantidad) AS unidades, SUM(v.total) AS total
         FROM ventas v LEFT JOIN productos p ON p.id = v.producto_id
         WHERE {" AND ".join(condiciones)}
         GROUP BY v.producto_id
-        ORDER BY SUM(v.cantidad) DESC, SUM(v.total) DESC
+        ORDER BY unidades DESC, total DESC
     """
 
     conexion = conectar()
