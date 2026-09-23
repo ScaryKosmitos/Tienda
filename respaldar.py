@@ -8,6 +8,9 @@ Uso:
 Usa la función de respaldo de SQLite, así que la copia sale bien aunque la
 aplicación esté abierta. En la carpeta "respaldos" se conservan solo los
 últimos MAX_RESPALDOS; los más antiguos se borran solos.
+
+La aplicación también llama a respaldo_automatico() al abrirse, que crea
+como máximo un respaldo por día.
 """
 import os
 import sqlite3
@@ -53,8 +56,29 @@ def borrar_respaldos_viejos(carpeta):
         os.remove(os.path.join(carpeta, viejo))
 
 
+def carpeta_respaldos():
+    """Carpeta 'respaldos' junto a inventario.db."""
+    return os.path.join(os.path.dirname(db._ruta_db()), "respaldos")
+
+
+def respaldo_automatico():
+    """
+    Se llama al abrir la aplicación. Crea como máximo un respaldo por día, para
+    que abrir la tienda muchas veces no desplace los respaldos de días anteriores.
+    Retorna la ruta del respaldo creado, o None si hoy ya había uno.
+    """
+    carpeta = carpeta_respaldos()
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    if os.path.isdir(carpeta) and any(f.startswith(f"inventario_{hoy}") for f in os.listdir(carpeta)):
+        return None
+
+    ruta = crear_respaldo(carpeta)
+    borrar_respaldos_viejos(carpeta)
+    return ruta
+
+
 if __name__ == "__main__":
-    carpeta_por_defecto = os.path.join(os.path.dirname(db._ruta_db()), "respaldos")
+    carpeta_por_defecto = carpeta_respaldos()
     carpeta = sys.argv[1] if len(sys.argv) > 1 else carpeta_por_defecto
 
     try:

@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 import customtkinter as ctk
@@ -37,6 +38,8 @@ class AplicacionInventario(ctk.CTk):
         self.id_producto_seleccionado = None
         self.orden_ascendente = True
         self.columna_ordenada = None
+        # Carrito: id_producto -> {"nombre", "precio", "cantidad"}
+        self.carrito = {}
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -81,7 +84,7 @@ class AplicacionInventario(ctk.CTk):
 
         # SECCIÓN VENTAS POS
         self.lbl_venta = ctk.CTkLabel(
-            self.frame_formulario, text="🛒 Registrar Venta", font=ctk.CTkFont(size=18, weight="bold")
+            self.frame_formulario, text="🛒 Venta", font=ctk.CTkFont(size=18, weight="bold")
         )
         self.lbl_venta.pack(padx=10, pady=(12, 6))
 
@@ -92,11 +95,11 @@ class AplicacionInventario(ctk.CTk):
 
         self.btn_vender = ctk.CTkButton(
             self.frame_formulario, 
-            text="Confirmar Venta", 
+            text="Agregar al Carrito", 
             font=ctk.CTkFont(size=14, weight="bold"),
             fg_color="#2E7D32", 
             hover_color="#1B5E20",
-            command=self.procesar_venta
+            command=self.agregar_al_carrito
         )
         self.btn_vender.pack(fill="x", padx=15, pady=5)
 
@@ -161,6 +164,7 @@ class AplicacionInventario(ctk.CTk):
         self.tabla_frame.grid_columnconfigure(0, weight=1)
 
         self.configurar_tabla()
+        self.configurar_carrito()
         self.cargar_productos_en_tabla()
 
     def configurar_tabla(self):
@@ -212,6 +216,48 @@ class AplicacionInventario(ctk.CTk):
                 self.tabla.insert("", "end", values=prod, tags=("stock_bajo",))
             else:
                 self.tabla.insert("", "end", values=prod)
+
+    def configurar_carrito(self):
+        self.frame_carrito = ctk.CTkFrame(self.frame_derecho)
+        self.frame_carrito.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        self.frame_carrito.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self.frame_carrito, text="🧺 Carrito", font=ctk.CTkFont(size=16, weight="bold")
+        ).grid(row=0, column=0, padx=10, pady=(6, 4), sticky="w")
+
+        self.lbl_total_carrito = ctk.CTkLabel(
+            self.frame_carrito, text="Total: $0.00", font=ctk.CTkFont(size=16, weight="bold")
+        )
+        self.lbl_total_carrito.grid(row=0, column=1, padx=10, pady=(6, 4), sticky="e")
+
+        columnas = ("producto", "cantidad", "precio", "subtotal")
+        self.tabla_carrito = ttk.Treeview(self.frame_carrito, columns=columnas, show="headings", height=4)
+        self.tabla_carrito.heading("producto", text="Producto")
+        self.tabla_carrito.heading("cantidad", text="Cant.")
+        self.tabla_carrito.heading("precio", text="Precio ($)")
+        self.tabla_carrito.heading("subtotal", text="Subtotal ($)")
+        self.tabla_carrito.column("producto", width=220)
+        self.tabla_carrito.column("cantidad", width=60, anchor="center")
+        self.tabla_carrito.column("precio", width=100, anchor="e")
+        self.tabla_carrito.column("subtotal", width=110, anchor="e")
+        self.tabla_carrito.grid(row=1, column=0, columnspan=2, padx=10, sticky="ew")
+
+        frame_botones = ctk.CTkFrame(self.frame_carrito, fg_color="transparent")
+        frame_botones.grid(row=2, column=0, columnspan=2, padx=10, pady=8, sticky="ew")
+
+        ctk.CTkButton(
+            frame_botones, text="Quitar", width=90, font=ctk.CTkFont(size=13),
+            fg_color="#555555", hover_color="#333333", command=self.quitar_del_carrito
+        ).pack(side="left")
+        ctk.CTkButton(
+            frame_botones, text="Vaciar", width=90, font=ctk.CTkFont(size=13),
+            fg_color="#D32F2F", hover_color="#B71C1C", command=self.vaciar_carrito
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            frame_botones, text="💵 Cobrar Venta", font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2E7D32", hover_color="#1B5E20", command=self.cobrar_carrito
+        ).pack(side="right")
 
     def aplicar_colores_tabla(self):
         """Ajusta los colores de las tablas (inventario e historial) al modo actual."""
@@ -298,7 +344,7 @@ class AplicacionInventario(ctk.CTk):
         self.cargar_productos_en_tabla()
 
     @manejar_errores_bd
-    def procesar_venta(self):
+    def agregar_al_carrito(self):
         if not self.id_producto_seleccionado:
             messagebox.showwarning("Selección Requerida", "Selecciona un producto de la tabla para vender.")
             return
@@ -316,11 +362,67 @@ class AplicacionInventario(ctk.CTk):
             messagebox.showerror("Error", "La cantidad debe ser un número entero positivo.")
             return
 
-        exito, mensaje = db.registrar_venta(self.id_producto_seleccionado, cantidad)
+        producto = db.obtener_producto(self.id_producto_seleccionado)
+        if not producto:
+            messagebox.showerror("Error", "El producto ya no existe.")
+            self.limpiar_formulario()
+            self.cargar_productos_en_tabla()
+            return
+
+        id_producto, nombre, _, precio, stock = producto
+        en_carrito = self.carrito.get(id_producto, {}).get("cantidad", 0)
+        if en_carrito + cantidad > stock:
+            messagebox.showerror(
+                "Stock Insuficiente",
+                f"Solo quedan {stock} unidades de '{nombre}' y ya hay {en_carrito} en el carrito."
+            )
+            return
+
+        self.carrito[id_producto] = {"nombre": nombre, "precio": precio, "cantidad": en_carrito + cantidad}
+        self.actualizar_carrito()
+        self.limpiar_formulario()
+
+    def actualizar_carrito(self):
+        for item in self.tabla_carrito.get_children():
+            self.tabla_carrito.delete(item)
+
+        total = 0.0
+        for id_producto, linea in self.carrito.items():
+            subtotal = linea["cantidad"] * linea["precio"]
+            total += subtotal
+            self.tabla_carrito.insert(
+                "", "end", iid=str(id_producto),
+                values=(linea["nombre"], linea["cantidad"], f"{linea['precio']:,.2f}", f"{subtotal:,.2f}")
+            )
+        self.lbl_total_carrito.configure(text=f"Total: ${total:,.2f}")
+
+    def quitar_del_carrito(self):
+        seleccion = self.tabla_carrito.selection()
+        if not seleccion:
+            messagebox.showwarning("Selección Requerida", "Selecciona un producto del carrito para quitarlo.")
+            return
+        for iid in seleccion:
+            self.carrito.pop(int(iid), None)
+        self.actualizar_carrito()
+
+    def vaciar_carrito(self):
+        if self.carrito and messagebox.askyesno("Confirmar", "¿Vaciar el carrito?"):
+            self.carrito.clear()
+            self.actualizar_carrito()
+
+    @manejar_errores_bd
+    def cobrar_carrito(self):
+        if not self.carrito:
+            messagebox.showwarning("Carrito Vacío", "Agrega productos al carrito antes de cobrar.")
+            return
+
+        items = [(id_producto, linea["cantidad"]) for id_producto, linea in self.carrito.items()]
+        exito, mensaje = db.registrar_venta_carrito(items)
 
         if exito:
             messagebox.showinfo("Venta Realizada", mensaje)
-            self.entry_cant_venta.delete(0, "end")
+            self.carrito.clear()
+            self.actualizar_carrito()
             self.limpiar_formulario()
             self.cargar_productos_en_tabla()
         else:
@@ -330,13 +432,24 @@ class AplicacionInventario(ctk.CTk):
     def abrir_ventana_ventas(self):
         ventana_ventas = ctk.CTkToplevel(self)
         ventana_ventas.title("Historial de Ventas")
-        ventana_ventas.geometry("750x480")
+        ventana_ventas.geometry("820x560")
         ventana_ventas.grab_set()
 
         lbl_titulo = ctk.CTkLabel(
             ventana_ventas, text="📜 Historial de Transacciones", font=ctk.CTkFont(size=18, weight="bold")
         )
         lbl_titulo.pack(pady=10)
+
+        # Filtros de fecha
+        frame_filtros = ctk.CTkFrame(ventana_ventas, fg_color="transparent")
+        frame_filtros.pack(fill="x", padx=15)
+
+        ctk.CTkLabel(frame_filtros, text="Desde:", font=ctk.CTkFont(size=13)).pack(side="left")
+        entry_desde = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
+        entry_desde.pack(side="left", padx=(4, 10))
+        ctk.CTkLabel(frame_filtros, text="Hasta:", font=ctk.CTkFont(size=13)).pack(side="left")
+        entry_hasta = ctk.CTkEntry(frame_filtros, width=110, placeholder_text="AAAA-MM-DD")
+        entry_hasta.pack(side="left", padx=(4, 10))
 
         frame_tabla = ctk.CTkFrame(ventana_ventas)
         frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
@@ -362,21 +475,76 @@ class AplicacionInventario(ctk.CTk):
         tabla_ventas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        ventas = db.obtener_ventas()
-        dinero_total = 0.0
-
-        for v in ventas:
-            id_venta, prod_id, nombre_prod, cant, total, fecha = v
-            dinero_total += total
-            tabla_ventas.insert("", "end", values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha))
-
         lbl_total_acumulado = ctk.CTkLabel(
             ventana_ventas, 
-            text=f"Total Recaudado: ${dinero_total:,.2f}", 
+            text="", 
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color="#2E7D32"
         )
         lbl_total_acumulado.pack(pady=10)
+
+        def poner_fechas(desde, hasta):
+            for entry, valor in ((entry_desde, desde), (entry_hasta, hasta)):
+                entry.delete(0, "end")
+                if valor:
+                    entry.insert(0, valor.strftime("%Y-%m-%d"))
+            cargar_ventas()
+
+        def cargar_ventas():
+            desde = entry_desde.get().strip() or None
+            hasta = entry_hasta.get().strip() or None
+            for fecha in (desde, hasta):
+                if fecha:
+                    try:
+                        datetime.strptime(fecha, "%Y-%m-%d")
+                    except ValueError:
+                        messagebox.showerror(
+                            "Fecha Inválida", f"'{fecha}' no es una fecha válida. Usa el formato AAAA-MM-DD.",
+                            parent=ventana_ventas
+                        )
+                        return
+
+            for item in tabla_ventas.get_children():
+                tabla_ventas.delete(item)
+
+            try:
+                ventas = db.obtener_ventas(desde, hasta)
+            except (sqlite3.Error, OSError) as error:
+                messagebox.showerror(
+                    "Error de Base de Datos",
+                    f"Ocurrió un problema al acceder a la base de datos:\n{error}",
+                    parent=ventana_ventas
+                )
+                return
+
+            dinero_total = 0.0
+            for v in ventas:
+                id_venta, prod_id, nombre_prod, cant, total, fecha = v
+                dinero_total += total
+                tabla_ventas.insert("", "end", values=(id_venta, nombre_prod, cant, f"${total:,.2f}", fecha))
+
+            if desde or hasta:
+                periodo = f"{desde or 'el inicio'} a {hasta or 'hoy'}"
+            else:
+                periodo = "todo el historial"
+            lbl_total_acumulado.configure(
+                text=f"Total Recaudado ({periodo}): ${dinero_total:,.2f}  ·  {len(ventas)} líneas de venta"
+            )
+
+        hoy = date.today()
+        botones_rapidos = (
+            ("Filtrar", cargar_ventas),
+            ("Hoy", lambda: poner_fechas(hoy, hoy)),
+            ("Esta semana", lambda: poner_fechas(hoy - timedelta(days=hoy.weekday()), hoy)),
+            ("Este mes", lambda: poner_fechas(hoy.replace(day=1), hoy)),
+            ("Todo", lambda: poner_fechas(None, None)),
+        )
+        for texto, comando in botones_rapidos:
+            ctk.CTkButton(
+                frame_filtros, text=texto, width=80, font=ctk.CTkFont(size=13), command=comando
+            ).pack(side="left", padx=2)
+
+        cargar_ventas()
 
     @manejar_errores_bd
     def eliminar_producto(self):

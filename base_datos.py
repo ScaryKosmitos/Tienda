@@ -137,49 +137,91 @@ def eliminar_producto(id_producto):
 
 # --- MÓDULO DE VENTAS ---
 
-def registrar_venta(id_producto, cantidad):
+class _VentaRechazada(Exception):
+    """Se lanza dentro de la transacción para revertirla por completo."""
+
+
+def obtener_producto(id_producto):
+    """Retorna (id, nombre, categoria, precio, stock) o None si no existe."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT * FROM productos WHERE id = ?", (id_producto,))
+        return cursor.fetchone()
+    finally:
+        conexion.close()
+
+
+def registrar_venta_carrito(items):
     """
-    Verifica stock, lo descuenta de la tabla productos y registra la venta con fecha y hora.
-    El nombre y el precio se leen de la base de datos en la misma transacción, para que
-    la venta siempre use los datos vigentes del producto.
-    Si algo falla a mitad de camino, la transacción se revierte por completo.
+    Registra la venta de varios productos a la vez. 'items' es una lista de
+    (id_producto, cantidad). Verifica el stock de cada uno, lo descuenta y
+    registra una línea por producto, todas con la misma fecha y hora.
+    El nombre y el precio se leen de la base de datos en la misma transacción.
+    Si un solo producto falla, no se registra nada: la venta es todo o nada.
+    Retorna (exito: bool, mensaje: str).
     """
+    if not items:
+        return False, "El carrito está vacío."
+
     conexion = conectar()
     try:
         with conexion:
             cursor = conexion.cursor()
-
-            cursor.execute("SELECT nombre, precio, stock FROM productos WHERE id = ?", (id_producto,))
-            res = cursor.fetchone()
-            if not res:
-                return False, "Producto no encontrado."
-
-            nombre_producto, precio_unitario, stock_actual = res
-            if stock_actual < cantidad:
-                return False, f"Stock insuficiente. Solo quedan {stock_actual} unidades."
-
-            # Descontar stock
-            nuevo_stock = stock_actual - cantidad
-            cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (nuevo_stock, id_producto))
-
-            # Registrar la transacción
-            total = cantidad * precio_unitario
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("""
-                INSERT INTO ventas (producto_id, nombre_producto, cantidad, total, fecha)
-                VALUES (?, ?, ?, ?, ?)
-            """, (id_producto, nombre_producto, cantidad, total, fecha_actual))
+            total_venta = 0.0
 
-        return True, f"Venta realizada. Total: ${total:,.2f}"
+            for id_producto, cantidad in items:
+                cursor.execute("SELECT nombre, precio, stock FROM productos WHERE id = ?", (id_producto,))
+                res = cursor.fetchone()
+                if not res:
+                    raise _VentaRechazada(f"Un producto del carrito (ID {id_producto}) ya no existe.")
+
+                nombre_producto, precio_unitario, stock_actual = res
+                if stock_actual < cantidad:
+                    raise _VentaRechazada(
+                        f"Stock insuficiente de '{nombre_producto}'. Solo quedan {stock_actual} unidades."
+                    )
+
+                cursor.execute(
+                    "UPDATE productos SET stock = ? WHERE id = ?", (stock_actual - cantidad, id_producto)
+                )
+                total = cantidad * precio_unitario
+                total_venta += total
+                cursor.execute("""
+                    INSERT INTO ventas (producto_id, nombre_producto, cantidad, total, fecha)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (id_producto, nombre_producto, cantidad, total, fecha_actual))
+
+        return True, f"Venta realizada. Total: ${total_venta:,.2f}"
+    except _VentaRechazada as rechazo:
+        return False, str(rechazo)
     finally:
         conexion.close()
 
-def obtener_ventas():
-    """Retorna todas las ventas realizadas ordenadas de más reciente a más antigua."""
+
+def obtener_ventas(desde=None, hasta=None):
+    """
+    Retorna las ventas ordenadas de más reciente a más antigua. 'desde' y
+    'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
+    """
+    condiciones, parametros = [], []
+    if desde:
+        condiciones.append("date(fecha) >= ?")
+        parametros.append(desde)
+    if hasta:
+        condiciones.append("date(fecha) <= ?")
+        parametros.append(hasta)
+
+    consulta = "SELECT * FROM ventas"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    consulta += " ORDER BY id DESC"
+
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT * FROM ventas ORDER BY id DESC")
+        cursor.execute(consulta, parametros)
         return cursor.fetchall()
     finally:
         conexion.close()
