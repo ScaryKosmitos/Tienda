@@ -192,9 +192,17 @@ class AplicacionInventario(ctk.CTk):
         self.configurar_carrito()
         self.cargar_productos_en_tabla()
 
+        # Enter como atajo: guardar desde el formulario, agregar al carrito desde la cantidad
+        for entry in (self.entry_nombre, self.entry_categoria, self.entry_precio, self.entry_stock):
+            entry.bind("<Return>", lambda _evento: self.guardar_producto())
+        self.entry_cant_venta.bind("<Return>", lambda _evento: self.agregar_al_carrito())
+
+        self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
+
     def configurar_tabla(self):
         columnas = ("id", "nombre", "categoria", "precio", "stock")
-        self.tabla = ttk.Treeview(self.tabla_frame, columns=columnas, show="headings")
+        # "browse": una sola fila a la vez, porque el formulario edita un producto
+        self.tabla = ttk.Treeview(self.tabla_frame, columns=columnas, show="headings", selectmode="browse")
 
         # Ajuste de tamaño de fuente en la tabla
         estilo = ttk.Style()
@@ -334,7 +342,7 @@ class AplicacionInventario(ctk.CTk):
         if not item_seleccionado:
             return
 
-        valores = self.tabla.item(item_seleccionado, "values")
+        valores = self.tabla.item(item_seleccionado[0], "values")
         self.id_producto_seleccionado = valores[0]
 
         self.entry_nombre.delete(0, "end")
@@ -369,6 +377,14 @@ class AplicacionInventario(ctk.CTk):
             messagebox.showerror("Dato Inválido", "El precio debe ser un número decimal y el stock un entero.")
             return
 
+        if db.categoria_es_nueva(categoria) and not messagebox.askyesno(
+            "Categoría Nueva",
+            f"La categoría '{categoria}' no existe todavía.\n\n"
+            f"Categorías actuales: {', '.join(db.obtener_categorias()) or '(ninguna)'}\n\n"
+            "¿Crear esta categoría nueva?"
+        ):
+            return
+
         if self.id_producto_seleccionado:
             exito, mensaje = db.actualizar_producto(self.id_producto_seleccionado, nombre, categoria, precio, stock)
         else:
@@ -381,6 +397,7 @@ class AplicacionInventario(ctk.CTk):
         messagebox.showinfo("Éxito", mensaje)
         self.limpiar_formulario()
         self.cargar_productos_en_tabla()
+        self.refrescar_carrito()
 
     @manejar_errores_bd
     def agregar_al_carrito(self):
@@ -435,6 +452,26 @@ class AplicacionInventario(ctk.CTk):
             )
         self.lbl_total_carrito.configure(text=f"Total: ${total:,.2f}")
 
+    def refrescar_carrito(self):
+        """
+        Vuelve a leer nombre y precio de cada producto del carrito, para que el
+        total mostrado coincida con lo que se va a cobrar. Quita los productos
+        que ya no existen. Retorna una lista de textos con los cambios hechos.
+        """
+        cambios = []
+        for id_producto, linea in list(self.carrito.items()):
+            producto = db.obtener_producto(id_producto)
+            if not producto:
+                cambios.append(f"'{linea['nombre']}' ya no existe y se quitó del carrito.")
+                del self.carrito[id_producto]
+                continue
+            _, nombre, _, precio, _ = producto
+            if precio != linea["precio"]:
+                cambios.append(f"'{nombre}': precio ${linea['precio']:,.2f} → ${precio:,.2f}")
+            linea["nombre"], linea["precio"] = nombre, precio
+        self.actualizar_carrito()
+        return cambios
+
     def quitar_del_carrito(self):
         seleccion = self.tabla_carrito.selection()
         if not seleccion:
@@ -454,6 +491,20 @@ class AplicacionInventario(ctk.CTk):
         if not self.carrito:
             messagebox.showwarning("Carrito Vacío", "Agrega productos al carrito antes de cobrar.")
             return
+
+        cambios = self.refrescar_carrito()
+        if cambios:
+            total = sum(linea["cantidad"] * linea["precio"] for linea in self.carrito.values())
+            if not self.carrito:
+                messagebox.showwarning("Carrito Actualizado", "\n".join(cambios))
+                return
+            if not messagebox.askyesno(
+                "Carrito Actualizado",
+                "Algunos productos cambiaron desde que se agregaron:\n\n"
+                + "\n".join(cambios)
+                + f"\n\nNuevo total: ${total:,.2f}\n¿Cobrar la venta?"
+            ):
+                return
 
         items = [(id_producto, linea["cantidad"]) for id_producto, linea in self.carrito.items()]
         exito, mensaje = db.registrar_venta_carrito(items)
@@ -545,6 +596,11 @@ class AplicacionInventario(ctk.CTk):
                             parent=ventana_ventas
                         )
                         return
+            if desde and hasta and desde > hasta:
+                messagebox.showerror(
+                    "Rango Inválido", "La fecha 'Desde' no puede ser posterior a 'Hasta'.", parent=ventana_ventas
+                )
+                return
 
             for item in tabla_ventas.get_children():
                 tabla_ventas.delete(item)
@@ -634,6 +690,9 @@ class AplicacionInventario(ctk.CTk):
                 frame_filtros, text=texto, width=80, font=ctk.CTkFont(size=13), command=comando
             ).pack(side="left", padx=2)
 
+        for entry in (entry_desde, entry_hasta):
+            entry.bind("<Return>", lambda _evento: cargar_ventas())
+
         cargar_ventas()
 
     @manejar_errores_bd
@@ -641,7 +700,7 @@ class AplicacionInventario(ctk.CTk):
         """Registra la llegada de mercancía para el producto seleccionado y muestra el historial de entradas."""
         ventana = ctk.CTkToplevel(self)
         ventana.title("Entrada de Mercancía")
-        ventana.geometry("640x480")
+        ventana.geometry("680x500")
         ventana.grab_set()
 
         ctk.CTkLabel(
@@ -674,16 +733,23 @@ class AplicacionInventario(ctk.CTk):
         frame_tabla = ctk.CTkFrame(ventana)
         frame_tabla.pack(fill="both", expand=True, padx=15, pady=10)
 
-        columnas = ("id", "producto", "cantidad", "fecha")
+        ctk.CTkLabel(
+            ventana, text="Movimientos de stock (entradas, stock inicial y ajustes manuales)",
+            font=ctk.CTkFont(size=13)
+        ).pack(padx=15, anchor="w")
+
+        columnas = ("id", "producto", "cantidad", "fecha", "motivo")
         tabla_entradas = ttk.Treeview(frame_tabla, columns=columnas, show="headings")
         tabla_entradas.heading("id", text="ID")
         tabla_entradas.heading("producto", text="Producto")
         tabla_entradas.heading("cantidad", text="Unidades")
         tabla_entradas.heading("fecha", text="Fecha y Hora")
+        tabla_entradas.heading("motivo", text="Motivo")
         tabla_entradas.column("id", width=50, anchor="center")
-        tabla_entradas.column("producto", width=220)
+        tabla_entradas.column("producto", width=200)
         tabla_entradas.column("cantidad", width=80, anchor="center")
-        tabla_entradas.column("fecha", width=160, anchor="center")
+        tabla_entradas.column("fecha", width=150, anchor="center")
+        tabla_entradas.column("motivo", width=110, anchor="center")
 
         scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=tabla_entradas.yview)
         tabla_entradas.configure(yscroll=scrollbar.set)
@@ -693,8 +759,8 @@ class AplicacionInventario(ctk.CTk):
         def cargar_entradas():
             for item in tabla_entradas.get_children():
                 tabla_entradas.delete(item)
-            for entrada in db.obtener_entradas():
-                tabla_entradas.insert("", "end", values=entrada)
+            for id_mov, nombre, cantidad, fecha, motivo in db.obtener_entradas():
+                tabla_entradas.insert("", "end", values=(id_mov, nombre, f"{cantidad:+d}", fecha, motivo))
 
         def registrar():
             cant_str = entry_cantidad.get().strip()
@@ -732,6 +798,8 @@ class AplicacionInventario(ctk.CTk):
                 messagebox.showerror("Error", mensaje, parent=ventana)
 
         btn_registrar.configure(command=registrar)
+        if producto:
+            entry_cantidad.bind("<Return>", lambda _evento: registrar())
         cargar_entradas()
 
     @manejar_errores_bd
@@ -769,6 +837,15 @@ class AplicacionInventario(ctk.CTk):
         self.entry_stock.delete(0, "end")
         self.entry_cant_venta.delete(0, "end")
         self.btn_guardar.configure(text="Guardar Producto", fg_color=["#3a7ebf", "#1f538d"], hover_color=["#325882", "#14375e"])
+
+
+    def cerrar_aplicacion(self):
+        if self.carrito and not messagebox.askyesno(
+            "Carrito Pendiente",
+            f"Hay {len(self.carrito)} producto(s) en el carrito sin cobrar.\n¿Cerrar de todas formas?"
+        ):
+            return
+        self.destroy()
 
 
 def iniciar_app():

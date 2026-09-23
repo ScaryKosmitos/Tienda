@@ -61,7 +61,7 @@ def inicializar_db():
             if "anulada" not in columnas_ventas:
                 cursor.execute("ALTER TABLE ventas ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0")
 
-            # Tabla de Entradas de Mercancía (reposición de stock)
+            # Movimientos de stock: entradas de mercancía, stock inicial y ajustes manuales
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS entradas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,13 +69,44 @@ def inicializar_db():
                     nombre_producto TEXT NOT NULL,
                     cantidad INTEGER NOT NULL,
                     fecha TEXT NOT NULL,
+                    motivo TEXT NOT NULL DEFAULT 'Entrada',
                     FOREIGN KEY (producto_id) REFERENCES productos (id)
                 )
             """)
+
+            # Las bases de datos anteriores no tienen la columna 'motivo'
+            columnas_entradas = [fila[1] for fila in cursor.execute("PRAGMA table_info(entradas)")]
+            if "motivo" not in columnas_entradas:
+                cursor.execute("ALTER TABLE entradas ADD COLUMN motivo TEXT NOT NULL DEFAULT 'Entrada'")
     finally:
         conexion.close()
 
 # --- OPERACIONES CRUD DE PRODUCTOS ---
+
+def _categoria_existente(cursor, categoria, excluir_id=None):
+    """
+    Si ya existe una categoría igual sin importar mayúsculas (ej: 'salsas'
+    y 'Salsas'), retorna la que ya existe para no crear duplicados.
+    'excluir_id' ignora al producto que se está editando, para que pueda
+    corregir la forma de escribir su propia categoría.
+    """
+    cursor.execute("SELECT DISTINCT categoria FROM productos WHERE id != ?", (excluir_id or -1,))
+    for (existente,) in cursor.fetchall():
+        if existente.casefold() == categoria.casefold():
+            return existente
+    return categoria
+
+def _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, motivo):
+    """Deja constancia de un cambio de stock en la tabla 'entradas'."""
+    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        INSERT INTO entradas (producto_id, nombre_producto, cantidad, fecha, motivo)
+        VALUES (?, ?, ?, ?, ?)
+    """, (id_producto, nombre_producto, cantidad, fecha_actual, motivo))
+
+def categoria_es_nueva(categoria):
+    """True si no hay ningún producto con esa categoría (sin importar mayúsculas)."""
+    return all(c.casefold() != categoria.casefold() for c in obtener_categorias())
 
 def agregar_producto(nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
@@ -88,20 +119,15 @@ def agregar_producto(nombre, categoria, precio, stock):
     conexion = conectar()
     try:
         with conexion:
-            conexion.execute("""
+            cursor = conexion.cursor()
+            categoria = _categoria_existente(cursor, categoria)
+            cursor.execute("""
                 INSERT INTO productos (nombre, categoria, precio, stock)
                 VALUES (?, ?, ?, ?)
             """, (nombre, categoria, precio, stock))
+            if stock > 0:
+                _registrar_movimiento(cursor, cursor.lastrowid, nombre, stock, "Stock inicial")
         return True, "Producto agregado."
-    finally:
-        conexion.close()
-
-def obtener_productos():
-    conexion = conectar()
-    try:
-        cursor = conexion.cursor()
-        cursor.execute("SELECT * FROM productos")
-        return cursor.fetchall()
     finally:
         conexion.close()
 
@@ -154,19 +180,35 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
     conexion = conectar()
     try:
         with conexion:
-            conexion.execute("""
+            cursor = conexion.cursor()
+            cursor.execute("SELECT stock FROM productos WHERE id = ?", (id_producto,))
+            res = cursor.fetchone()
+            if not res:
+                return False, "Producto no encontrado."
+
+            categoria = _categoria_existente(cursor, categoria, excluir_id=id_producto)
+            cursor.execute("""
                 UPDATE productos
                 SET nombre = ?, categoria = ?, precio = ?, stock = ?
                 WHERE id = ?
             """, (nombre, categoria, precio, stock, id_producto))
+
+            # Un cambio de stock hecho a mano queda registrado como ajuste
+            diferencia = stock - res[0]
+            if diferencia:
+                _registrar_movimiento(cursor, id_producto, nombre, diferencia, "Ajuste manual")
+
+        if diferencia:
+            return True, f"Producto actualizado. Se registró un ajuste de stock de {diferencia:+d}."
         return True, "Producto actualizado."
     finally:
         conexion.close()
 
 def eliminar_producto(id_producto):
     """
-    Elimina un producto. Si tiene ventas o entradas de mercancía asociadas,
-    rechaza el borrado para no dejar referencias rotas en el historial.
+    Elimina un producto junto con sus movimientos de stock. Si tiene ventas
+    asociadas, rechaza el borrado para no dejar referencias rotas en el
+    historial de ventas.
     Retorna (exito: bool, mensaje: str).
     """
     conexion = conectar()
@@ -176,9 +218,7 @@ def eliminar_producto(id_producto):
             cursor.execute("SELECT COUNT(*) FROM ventas WHERE producto_id = ?", (id_producto,))
             if cursor.fetchone()[0] > 0:
                 return False, "No se puede eliminar: el producto tiene ventas registradas en el historial."
-            cursor.execute("SELECT COUNT(*) FROM entradas WHERE producto_id = ?", (id_producto,))
-            if cursor.fetchone()[0] > 0:
-                return False, "No se puede eliminar: el producto tiene entradas de mercancía registradas."
+            cursor.execute("DELETE FROM entradas WHERE producto_id = ?", (id_producto,))
             cursor.execute("DELETE FROM productos WHERE id = ?", (id_producto,))
         return True, "Producto eliminado."
     except sqlite3.IntegrityError:
@@ -340,22 +380,22 @@ def registrar_entrada(id_producto, cantidad):
 
             nombre_producto, stock_actual = res
             cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, id_producto))
-            fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("""
-                INSERT INTO entradas (producto_id, nombre_producto, cantidad, fecha)
-                VALUES (?, ?, ?, ?)
-            """, (id_producto, nombre_producto, cantidad, fecha_actual))
+            _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, "Entrada")
 
         return True, f"Entrada registrada: +{cantidad} de '{nombre_producto}'. Stock nuevo: {stock_actual + cantidad}."
     finally:
         conexion.close()
 
 def obtener_entradas():
-    """Retorna las entradas de mercancía, de la más reciente a la más antigua."""
+    """
+    Retorna los movimientos de stock (entradas, stock inicial y ajustes
+    manuales) como (id, nombre_producto, cantidad, fecha, motivo), del más
+    reciente al más antiguo.
+    """
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT id, nombre_producto, cantidad, fecha FROM entradas ORDER BY id DESC")
+        cursor.execute("SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas ORDER BY id DESC")
         return cursor.fetchall()
     finally:
         conexion.close()
