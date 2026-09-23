@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import sqlite3
@@ -59,7 +60,7 @@ def inicializar_db():
 
 def agregar_producto(nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str)."""
-    if precio <= 0:
+    if not math.isfinite(precio) or precio <= 0:
         return False, "El precio debe ser mayor a 0."
     if stock <= 0:
         return False, "El stock debe ser mayor a 0."
@@ -96,7 +97,7 @@ def buscar_producto_por_nombre(texto_busqueda):
 def actualizar_producto(id_producto, nombre, categoria, precio, stock):
     """Retorna (exito: bool, mensaje: str). El stock puede quedar en 0 (agotado),
     pero nunca negativo, y el precio siempre debe ser mayor a 0."""
-    if precio <= 0:
+    if not math.isfinite(precio) or precio <= 0:
         return False, "El precio debe ser mayor a 0."
     if stock < 0:
         return False, "El stock no puede ser negativo."
@@ -135,9 +136,11 @@ def eliminar_producto(id_producto):
 
 # --- MÓDULO DE VENTAS ---
 
-def registrar_venta(id_producto, nombre_producto, cantidad, precio_unitario):
+def registrar_venta(id_producto, cantidad):
     """
     Verifica stock, lo descuenta de la tabla productos y registra la venta con fecha y hora.
+    El nombre y el precio se leen de la base de datos en la misma transacción, para que
+    la venta siempre use los datos vigentes del producto.
     Si algo falla a mitad de camino, la transacción se revierte por completo.
     """
     conexion = conectar()
@@ -145,12 +148,12 @@ def registrar_venta(id_producto, nombre_producto, cantidad, precio_unitario):
         with conexion:
             cursor = conexion.cursor()
 
-            cursor.execute("SELECT stock FROM productos WHERE id = ?", (id_producto,))
+            cursor.execute("SELECT nombre, precio, stock FROM productos WHERE id = ?", (id_producto,))
             res = cursor.fetchone()
             if not res:
                 return False, "Producto no encontrado."
 
-            stock_actual = res[0]
+            nombre_producto, precio_unitario, stock_actual = res
             if stock_actual < cantidad:
                 return False, f"Stock insuficiente. Solo quedan {stock_actual} unidades."
 

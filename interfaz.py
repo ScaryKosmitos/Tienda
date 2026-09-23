@@ -35,8 +35,6 @@ class AplicacionInventario(ctk.CTk):
 
         # Variables internas de selección
         self.id_producto_seleccionado = None
-        self.precio_producto_seleccionado = 0.0
-        self.nombre_producto_seleccionado = ""
         self.orden_ascendente = True
 
         self.grid_columnconfigure(1, weight=1)
@@ -230,9 +228,7 @@ class AplicacionInventario(ctk.CTk):
 
         valores = self.tabla.item(item_seleccionado, "values")
         self.id_producto_seleccionado = valores[0]
-        self.nombre_producto_seleccionado = valores[1]
-        self.precio_producto_seleccionado = float(valores[3])
-        
+
         self.entry_nombre.delete(0, "end")
         self.entry_nombre.insert(0, valores[1])
 
@@ -297,12 +293,7 @@ class AplicacionInventario(ctk.CTk):
             messagebox.showerror("Error", "La cantidad debe ser un número entero positivo.")
             return
 
-        exito, mensaje = db.registrar_venta(
-            self.id_producto_seleccionado, 
-            self.nombre_producto_seleccionado, 
-            cantidad, 
-            self.precio_producto_seleccionado
-        )
+        exito, mensaje = db.registrar_venta(self.id_producto_seleccionado, cantidad)
 
         if exito:
             messagebox.showinfo("Venta Realizada", mensaje)
@@ -395,6 +386,9 @@ class AplicacionInventario(ctk.CTk):
 
     def limpiar_formulario(self):
         self.id_producto_seleccionado = None
+        # Quitar la selección de la tabla para que al volver a hacer clic
+        # en la misma fila se carguen de nuevo sus datos en el formulario
+        self.tabla.selection_remove(self.tabla.selection())
         self.entry_nombre.delete(0, "end")
         self.entry_categoria.delete(0, "end")
         self.entry_precio.delete(0, "end")
