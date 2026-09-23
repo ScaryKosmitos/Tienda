@@ -1,5 +1,6 @@
 import math
 import os
+import re
 import sys
 import sqlite3
 from datetime import datetime
@@ -11,6 +12,9 @@ from formato import clave_orden, formatear_cambio, formatear_numero, formatear_p
 # error al escribir)
 STOCK_MAXIMO = 1_000_000
 PRECIO_MAXIMO = 100_000_000
+
+# Códigos de barras: números (EAN-13, UPC...) o letras, números y guiones (Code 128)
+_CODIGO_VALIDO = re.compile(r"[0-9A-Za-z-]{1,32}")
 
 def _ruta_db():
     """
@@ -51,9 +55,20 @@ def inicializar_db():
                     nombre TEXT NOT NULL,
                     categoria TEXT NOT NULL,
                     precio REAL NOT NULL,
-                    stock INTEGER NOT NULL
+                    stock INTEGER NOT NULL,
+                    codigo_barras TEXT
                 )
             """)
+
+            # Las bases de datos anteriores no tienen la columna 'codigo_barras'.
+            # El índice impide que dos productos tengan el mismo código (los
+            # productos sin código quedan en NULL, que no cuenta como repetido)
+            columnas_productos = [fila[1] for fila in cursor.execute("PRAGMA table_info(productos)")]
+            if "codigo_barras" not in columnas_productos:
+                cursor.execute("ALTER TABLE productos ADD COLUMN codigo_barras TEXT")
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_codigo ON productos (codigo_barras)"
+            )
 
             # Un recibo agrupa las líneas de una misma venta y guarda con cuánto pagó el cliente
             cursor.execute("""
@@ -172,6 +187,46 @@ def nombre_repetido(nombre, excluir_id=None):
     finally:
         conexion.close()
 
+def leer_codigo(texto):
+    """
+    Limpia el código de barras escrito o escaneado. Retorna (codigo, error):
+    codigo es None si el campo está vacío (producto sin código).
+    """
+    codigo = texto.strip()
+    if not codigo:
+        return None, None
+    if not _CODIGO_VALIDO.fullmatch(codigo):
+        return None, "El código de barras solo puede tener números, letras y guiones (máximo 32)."
+    return codigo, None
+
+def codigo_repetido(codigo, excluir_id=None):
+    """Si otro producto ya tiene ese código de barras, retorna su nombre; si no, None."""
+    if not codigo:
+        return None
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT nombre FROM productos WHERE codigo_barras = ? AND id != ?", (codigo, excluir_id or -1)
+        )
+        res = cursor.fetchone()
+        return res["nombre"] if res else None
+    finally:
+        conexion.close()
+
+def _mensaje_codigo_repetido(codigo, nombre):
+    return f"El código {codigo} ya pertenece a '{nombre}'."
+
+def buscar_por_codigo(codigo):
+    """Retorna el producto con ese código de barras, o None si no está registrado."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT * FROM productos WHERE codigo_barras = ?", (codigo.strip(),))
+        return cursor.fetchone()
+    finally:
+        conexion.close()
+
 def _mensaje_repetido(existente):
     return f"Ya existe un producto llamado '{existente}'. Usa otro nombre o edita el que ya existe."
 
@@ -179,12 +234,19 @@ def categoria_es_nueva(categoria):
     """True si no hay ningún producto con esa categoría (sin importar mayúsculas)."""
     return all(c.casefold() != categoria.casefold() for c in obtener_categorias())
 
-def agregar_producto(nombre, categoria, precio, stock):
+def agregar_producto(nombre, categoria, precio, stock, codigo=None):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
-    con stock 0 (por ejemplo, uno que todavía no ha llegado)."""
+    con stock 0 (por ejemplo, uno que todavía no ha llegado). 'codigo' es el
+    código de barras, o None si el producto no tiene."""
     error = validar_producto(precio, stock)
     if error:
         return False, error
+    codigo, error = leer_codigo(codigo or "")
+    if error:
+        return False, error
+    otro = codigo_repetido(codigo)
+    if otro:
+        return False, _mensaje_codigo_repetido(codigo, otro)
 
     conexion = conectar()
     try:
@@ -195,9 +257,9 @@ def agregar_producto(nombre, categoria, precio, stock):
                 return False, _mensaje_repetido(existente)
             categoria = _categoria_existente(cursor, categoria)
             cursor.execute("""
-                INSERT INTO productos (nombre, categoria, precio, stock)
-                VALUES (?, ?, ?, ?)
-            """, (nombre, categoria, precio, stock))
+                INSERT INTO productos (nombre, categoria, precio, stock, codigo_barras)
+                VALUES (?, ?, ?, ?, ?)
+            """, (nombre, categoria, precio, stock, codigo))
             if stock > 0:
                 _registrar_movimiento(cursor, cursor.lastrowid, nombre, stock, "Stock inicial")
         return True, "Producto agregado."
@@ -207,7 +269,7 @@ def agregar_producto(nombre, categoria, precio, stock):
 def buscar_productos(texto="", categoria=None, stock_menor_a=None):
     """
     Filtra productos por nombre (texto parcial, sin importar tildes ni
-    mayúsculas), categoría exacta y/o stock menor a un valor. Los filtros
+    mayúsculas) o código de barras, categoría exacta y/o stock menor a un valor. Los filtros
     vacíos o None se ignoran.
     """
     condiciones, parametros = [], []
@@ -234,7 +296,10 @@ def buscar_productos(texto="", categoria=None, stock_menor_a=None):
     # así que el filtro por nombre se hace aquí
     if texto:
         buscado = sin_tildes(texto)
-        productos = [p for p in productos if buscado in sin_tildes(p["nombre"])]
+        productos = [
+            p for p in productos
+            if buscado in sin_tildes(p["nombre"]) or (p["codigo_barras"] and texto.strip() in p["codigo_barras"])
+        ]
     return productos
 
 def obtener_categorias():
@@ -248,12 +313,19 @@ def obtener_categorias():
     finally:
         conexion.close()
 
-def actualizar_producto(id_producto, nombre, categoria, precio, stock):
+def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=None):
     """Retorna (exito: bool, mensaje: str). El stock puede quedar en 0 (agotado),
-    pero nunca negativo, y el precio siempre debe ser mayor a 0."""
+    pero nunca negativo, y el precio siempre debe ser mayor a 0. 'codigo' es el
+    código de barras, o None para dejar el producto sin código."""
     error = validar_producto(precio, stock)
     if error:
         return False, error
+    codigo, error = leer_codigo(codigo or "")
+    if error:
+        return False, error
+    otro = codigo_repetido(codigo, excluir_id=id_producto)
+    if otro:
+        return False, _mensaje_codigo_repetido(codigo, otro)
 
     conexion = conectar()
     try:
@@ -274,9 +346,9 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock):
             categoria = _categoria_existente(cursor, categoria, excluir_id=id_producto)
             cursor.execute("""
                 UPDATE productos
-                SET nombre = ?, categoria = ?, precio = ?, stock = ?
+                SET nombre = ?, categoria = ?, precio = ?, stock = ?, codigo_barras = ?
                 WHERE id = ?
-            """, (nombre, categoria, precio, stock, id_producto))
+            """, (nombre, categoria, precio, stock, codigo, id_producto))
 
             # Un cambio de stock hecho a mano queda registrado como ajuste
             diferencia = stock - res["stock"]
@@ -318,7 +390,7 @@ class _VentaRechazada(Exception):
 
 
 def obtener_producto(id_producto):
-    """Retorna el producto (columnas id, nombre, categoria, precio, stock) o None si no existe."""
+    """Retorna el producto (columnas id, nombre, categoria, precio, stock, codigo_barras) o None si no existe."""
     conexion = conectar()
     try:
         cursor = conexion.cursor()

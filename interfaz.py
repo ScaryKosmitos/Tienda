@@ -19,7 +19,7 @@ class AplicacionInventario(ctk.CTk):
 
         self.title("Sistema CRUD y Gestión de Inventario")
         self.geometry("1100x650")
-        self.minsize(900, 600)
+        self.minsize(900, 640)
 
         # Variables internas de selección
         self.id_producto_seleccionado = None
@@ -45,6 +45,13 @@ class AplicacionInventario(ctk.CTk):
             self.frame_formulario, placeholder_text="Nombre del producto", font=ctk.CTkFont(size=14)
         )
         self.entry_nombre.pack(fill="x", padx=15, pady=5)
+
+        # No lleva el atajo de Enter: el lector escribe el código y "presiona" Enter,
+        # y eso guardaría el producto antes de terminar de llenar el formulario
+        self.entry_codigo = ctk.CTkEntry(
+            self.frame_formulario, placeholder_text="Código de barras (opcional)", font=ctk.CTkFont(size=14)
+        )
+        self.entry_codigo.pack(fill="x", padx=15, pady=5)
 
         self.entry_categoria = ctk.CTkEntry(
             self.frame_formulario, placeholder_text="Categoría (ej: Lácteos)", font=ctk.CTkFont(size=14)
@@ -181,10 +188,13 @@ class AplicacionInventario(ctk.CTk):
             entry.bind("<Return>", lambda _evento: self.guardar_producto())
         self.entry_cant_venta.bind("<Return>", lambda _evento: self.agregar_al_carrito())
 
+        # El cursor empieza en el campo de escanear, para vender apenas se abre la tienda
+        self.after(200, self.entry_escanear.focus_set)
+
         self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
 
     def configurar_tabla(self):
-        columnas = ("id", "nombre", "categoria", "precio", "stock")
+        columnas = ("id", "nombre", "categoria", "precio", "stock", "codigo")
         # "browse": una sola fila a la vez, porque el formulario edita un producto
         self.tabla = ttk.Treeview(self.tabla_frame, columns=columnas, show="headings", selectmode="browse")
 
@@ -199,17 +209,19 @@ class AplicacionInventario(ctk.CTk):
 
         # Encabezados con función de ordenamiento al hacer clic
         self.titulos_columnas = {
-            "id": "ID", "nombre": "Nombre", "categoria": "Categoría", "precio": "Precio ($)", "stock": "Stock"
+            "id": "ID", "nombre": "Nombre", "categoria": "Categoría", "precio": "Precio ($)", "stock": "Stock",
+            "codigo": "Código"
         }
         for columna in columnas:
             self.tabla.heading(columna, command=lambda c=columna: self.ordenar_por_columna(c))
         self.actualizar_flechas_orden()
 
         self.tabla.column("id", width=50, anchor="center")
-        self.tabla.column("nombre", width=200)
-        self.tabla.column("categoria", width=130)
+        self.tabla.column("nombre", width=180)
+        self.tabla.column("categoria", width=120)
         self.tabla.column("precio", width=100, anchor="e")
         self.tabla.column("stock", width=80, anchor="center")
+        self.tabla.column("codigo", width=130, anchor="center")
 
         # Alerta visual en rojo para productos con stock bajo
         self.tabla.tag_configure("stock_bajo", foreground="#FF3333")
@@ -236,10 +248,13 @@ class AplicacionInventario(ctk.CTk):
         for item in self.tabla.get_children():
             self.tabla.delete(item)
 
-        for id_producto, nombre, categoria, precio, stock in lista_productos:
-            valores = (id_producto, nombre, categoria, formatear_precio(precio), formatear_numero(stock))
-            etiquetas = ("stock_bajo",) if stock < STOCK_BAJO else ()
-            self.tabla.insert("", "end", iid=str(id_producto), values=valores, tags=etiquetas)
+        for p in lista_productos:
+            valores = (
+                p["id"], p["nombre"], p["categoria"], formatear_precio(p["precio"]), formatear_numero(p["stock"]),
+                p["codigo_barras"] or ""
+            )
+            etiquetas = ("stock_bajo",) if p["stock"] < STOCK_BAJO else ()
+            self.tabla.insert("", "end", iid=str(p["id"]), values=valores, tags=etiquetas)
 
         # Recargar la tabla (tras una venta, búsqueda, etc.) no pierde el orden elegido
         self.aplicar_orden()
@@ -270,10 +285,20 @@ class AplicacionInventario(ctk.CTk):
             self.frame_carrito, text="🧺 Carrito", font=ctk.CTkFont(size=16, weight="bold")
         ).grid(row=0, column=0, padx=10, pady=(6, 4), sticky="w")
 
+        # Venta con lector de códigos de barras: cada escaneo suma 1 unidad al carrito
+        self.entry_escanear = ctk.CTkEntry(
+            self.frame_carrito, width=230, placeholder_text="📷 Escanear código de barras", font=ctk.CTkFont(size=14)
+        )
+        self.entry_escanear.grid(row=0, column=1, padx=(10, 6), pady=(6, 4))
+        self.entry_escanear.bind("<Return>", lambda _evento: self.escanear_codigo())
+
+        self.lbl_escaneo = ctk.CTkLabel(self.frame_carrito, text="", font=ctk.CTkFont(size=13))
+        self.lbl_escaneo.grid(row=0, column=2, padx=6, pady=(6, 4), sticky="w")
+
         self.lbl_total_carrito = ctk.CTkLabel(
             self.frame_carrito, text="Total: $0", font=ctk.CTkFont(size=16, weight="bold")
         )
-        self.lbl_total_carrito.grid(row=0, column=1, padx=10, pady=(6, 4), sticky="e")
+        self.lbl_total_carrito.grid(row=0, column=3, padx=10, pady=(6, 4), sticky="e")
 
         columnas = ("producto", "cantidad", "precio", "subtotal")
         self.tabla_carrito = ttk.Treeview(self.frame_carrito, columns=columnas, show="headings", height=4)
@@ -285,10 +310,10 @@ class AplicacionInventario(ctk.CTk):
         self.tabla_carrito.column("cantidad", width=60, anchor="center")
         self.tabla_carrito.column("precio", width=100, anchor="e")
         self.tabla_carrito.column("subtotal", width=110, anchor="e")
-        self.tabla_carrito.grid(row=1, column=0, columnspan=2, padx=10, sticky="ew")
+        self.tabla_carrito.grid(row=1, column=0, columnspan=4, padx=10, sticky="ew")
 
         frame_botones = ctk.CTkFrame(self.frame_carrito, fg_color="transparent")
-        frame_botones.grid(row=2, column=0, columnspan=2, padx=10, pady=8, sticky="ew")
+        frame_botones.grid(row=2, column=0, columnspan=4, padx=10, pady=8, sticky="ew")
 
         ctk.CTkButton(
             frame_botones, text="Quitar", width=90, font=ctk.CTkFont(size=13),
@@ -353,6 +378,7 @@ class AplicacionInventario(ctk.CTk):
                 flecha = "↕"
             self.tabla.heading(columna, text=f"{titulo} {flecha}")
 
+    @manejar_errores_bd
     def cargar_producto_en_formulario(self, event):
         item_seleccionado = self.tabla.selection()
         if not item_seleccionado:
@@ -376,6 +402,13 @@ class AplicacionInventario(ctk.CTk):
 
         self.entry_stock.delete(0, "end")
         self.entry_stock.insert(0, valores[4])
+
+        # El código se lee de la base de datos y no de la tabla, porque la tabla
+        # podría convertirlo en número y quitarle los ceros iniciales (0123... -> 123...)
+        producto = db.obtener_producto(self.id_producto_seleccionado)
+        self.entry_codigo.delete(0, "end")
+        if producto and producto["codigo_barras"]:
+            self.entry_codigo.insert(0, producto["codigo_barras"])
 
         self.btn_guardar.configure(text="Actualizar Producto", fg_color="#2E7D32", hover_color="#1B5E20")
 
@@ -412,6 +445,14 @@ class AplicacionInventario(ctk.CTk):
                 f"Ya existe un producto llamado '{existente}'. Usa otro nombre o edita el que ya existe."
             )
             return
+        codigo, error = db.leer_codigo(self.entry_codigo.get())
+        if error:
+            messagebox.showerror("Código Inválido", error)
+            return
+        otro = db.codigo_repetido(codigo, excluir_id=self.id_producto_seleccionado)
+        if otro:
+            messagebox.showerror("Código Repetido", f"El código {codigo} ya pertenece a '{otro}'.")
+            return
 
         if db.categoria_es_nueva(categoria) and not messagebox.askyesno(
             "Categoría Nueva",
@@ -422,9 +463,11 @@ class AplicacionInventario(ctk.CTk):
             return
 
         if self.id_producto_seleccionado:
-            exito, mensaje = db.actualizar_producto(self.id_producto_seleccionado, nombre, categoria, precio, stock)
+            exito, mensaje = db.actualizar_producto(
+                self.id_producto_seleccionado, nombre, categoria, precio, stock, codigo
+            )
         else:
-            exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock)
+            exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock, codigo)
 
         if not exito:
             messagebox.showerror("Dato Inválido", mensaje)
@@ -461,6 +504,11 @@ class AplicacionInventario(ctk.CTk):
             self.cargar_productos_en_tabla()
             return
 
+        if self.sumar_al_carrito(producto, cantidad):
+            self.limpiar_formulario()
+
+    def sumar_al_carrito(self, producto, cantidad):
+        """Suma unidades de un producto al carrito si hay stock. Retorna True si se agregaron."""
         en_carrito = self.carrito.get(producto["id"], {}).get("cantidad", 0)
         if en_carrito + cantidad > producto["stock"]:
             messagebox.showerror(
@@ -468,13 +516,47 @@ class AplicacionInventario(ctk.CTk):
                 f"Solo quedan {formatear_numero(producto['stock'])} unidades de '{producto['nombre']}' "
                 f"y ya hay {formatear_numero(en_carrito)} en el carrito."
             )
-            return
+            return False
 
         self.carrito[producto["id"]] = {
             "nombre": producto["nombre"], "precio": producto["precio"], "cantidad": en_carrito + cantidad
         }
         self.actualizar_carrito()
-        self.limpiar_formulario()
+        return True
+
+    @manejar_errores_bd
+    def escanear_codigo(self):
+        """El lector escribe el código y presiona Enter: se suma 1 unidad de ese producto al carrito."""
+        codigo = self.entry_escanear.get().strip()
+        self.entry_escanear.delete(0, "end")
+        if not codigo:
+            return
+
+        producto = db.buscar_por_codigo(codigo)
+        if producto:
+            if self.sumar_al_carrito(producto, 1):
+                cantidad = formatear_numero(self.carrito[producto["id"]]["cantidad"])
+                # Nombre recortado para que el aviso no empuje el total fuera de la ventana
+                nombre = producto["nombre"] if len(producto["nombre"]) <= 22 else producto["nombre"][:21] + "…"
+                self.lbl_escaneo.configure(text=f"✓ {nombre} ({cantidad} en el carrito)")
+            else:
+                self.lbl_escaneo.configure(text="")
+            self.entry_escanear.focus_set()
+            return
+
+        self.lbl_escaneo.configure(text="")
+        if messagebox.askyesno(
+            "Código No Registrado",
+            f"El código {codigo} no pertenece a ningún producto.\n\n"
+            "¿Quieres registrar un producto nuevo con este código?\n\n"
+            "(Para ponérselo a un producto que ya existe, selecciónalo en la tabla y "
+            "escanéalo en el campo 'Código de barras' del formulario.)"
+        ):
+            self.limpiar_formulario()
+            self.entry_codigo.insert(0, codigo)
+            self.entry_nombre.focus_set()
+        else:
+            self.entry_escanear.focus_set()
 
     def actualizar_carrito(self):
         for item in self.tabla_carrito.get_children():
@@ -489,6 +571,8 @@ class AplicacionInventario(ctk.CTk):
                 values=(linea["nombre"], formatear_numero(linea["cantidad"]), formatear_precio(linea["precio"]), formatear_precio(subtotal))
             )
         self.lbl_total_carrito.configure(text=f"Total: {formatear_precio(total)}")
+        if not self.carrito:
+            self.lbl_escaneo.configure(text="")
 
     def refrescar_carrito(self):
         """
@@ -618,6 +702,7 @@ class AplicacionInventario(ctk.CTk):
         self.entry_categoria.delete(0, "end")
         self.entry_precio.delete(0, "end")
         self.entry_stock.delete(0, "end")
+        self.entry_codigo.delete(0, "end")
         self.entry_cant_venta.delete(0, "end")
         self.btn_guardar.configure(text="Guardar Producto", fg_color=["#3a7ebf", "#1f538d"], hover_color=["#325882", "#14375e"])
 

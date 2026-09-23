@@ -8,13 +8,17 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 ## Funciones
 
 **Inventario**
-- Registrar, editar y eliminar productos (nombre, categoría, precio y stock).
-- Búsqueda por nombre sin importar tildes ni mayúsculas ("jabon" encuentra "Jabón").
+- Registrar, editar y eliminar productos (nombre, categoría, precio, stock y código de barras opcional).
+- No permite productos repetidos ("Jabon" y "Jabón" cuentan como el mismo) ni códigos de barras repetidos.
+- Búsqueda por nombre sin importar tildes ni mayúsculas ("jabon" encuentra "Jabón") o por código de barras.
 - Filtros por categoría y por stock bajo; los productos con menos de 5 unidades se marcan en rojo.
-- Ordenar la tabla haciendo clic en los encabezados (▲ de menor a mayor, ▼ de mayor a menor).
+- Ordenar la tabla haciendo clic en los encabezados (▲ de menor a mayor, ▼ de mayor a menor), en
+  orden alfabético español (las tildes no alteran el orden y la ñ va después de la n).
 - Entradas de mercancía y registro de todos los movimientos de stock (stock inicial, entradas y ajustes manuales).
 
 **Ventas**
+- Venta híbrida: escaneando con un lector de códigos de barras (cada escaneo suma 1 unidad al
+  carrito) o a mano, seleccionando el producto y escribiendo la cantidad (para los que no tienen código).
 - Carrito con varios productos por venta. La venta es "todo o nada": si un producto no tiene
   stock suficiente, no se registra ninguno.
 - Cálculo del cambio al cobrar, según con cuánto paga el cliente.
@@ -30,7 +34,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 **Seguridad de los datos**
 - Respaldo automático de la base de datos una vez al día, al abrir la aplicación.
 - Precios y cantidades en formato colombiano: `$1.500`, `$1.500,50`, `1.000 unidades`.
-- Validaciones para evitar datos incorrectos (precios en 0, stock negativo o mayor a 1.000.000).
+- Validaciones para evitar datos incorrectos (precios en 0 o mayores a $100.000.000, stock negativo
+  o mayor a 1.000.000).
 
 ## Requisitos
 
@@ -39,6 +44,9 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
   - `customtkinter`: la interfaz gráfica.
   - `openpyxl`: la exportación a Excel. Es opcional; sin ella la aplicación funciona igual,
     solo que el botón de exportar avisa que falta.
+
+Para vender escaneando sirve cualquier lector de códigos de barras USB que funcione como teclado
+(los "plug and play" o "USB HID"): no necesita drivers. Sin lector, el código se puede escribir a mano.
 
 En Windows, Tkinter viene incluido con el instalador de Python. En Linux a veces hay que
 instalarlo aparte (por ejemplo, el paquete `tk` en Arch/CachyOS o `python3-tk` en Ubuntu/Debian).
@@ -76,7 +84,9 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 |---|---|
 | Agregar un producto | Llenar el formulario de la izquierda y pulsar **Guardar Producto**. |
 | Editar un producto | Hacer clic en él en la tabla, cambiar los datos y pulsar **Actualizar Producto**. |
-| Vender | Seleccionar el producto, escribir la cantidad, pulsar **Agregar al Carrito** y luego **💵 Cobrar Venta**. |
+| Vender escaneando | Con el cursor en **📷 Escanear código de barras** (junto al carrito), escanear cada producto y luego pulsar **💵 Cobrar Venta**. |
+| Vender a mano | Seleccionar el producto, escribir la cantidad, pulsar **Agregar al Carrito** y luego **💵 Cobrar Venta**. |
+| Asignar un código de barras | Seleccionar el producto, escanear en el campo **Código de barras** del formulario y pulsar **Actualizar Producto**. Si se escanea al vender un código que no existe, el programa ofrece registrar el producto. |
 | Registrar mercancía que llegó | Seleccionar el producto y pulsar **📥 Entrada de Mercancía**. |
 | Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **🖨 Abrir para imprimir o guardar** y luego Ctrl+P en el navegador. |
 | Ver un recibo anterior | En **📋 Historial de Ventas**, seleccionar la venta y pulsar **🧾 Ver Recibo**. |
@@ -117,7 +127,7 @@ Por eso la lógica de datos puede usarse o probarse sin abrir ninguna ventana.
 
 `inventario.db` tiene cuatro tablas:
 
-- **productos**: id, nombre, categoría, precio y stock.
+- **productos**: id, nombre, categoría, precio, stock y código de barras (opcional, sin repetir).
 - **recibos**: uno por venta, con la fecha, el total y el dinero que entregó el cliente.
 - **ventas**: una línea por producto vendido, con cantidad, total, fecha, si fue anulada y el recibo
   al que pertenece. Guarda también el nombre del producto, para que el historial se entienda aunque

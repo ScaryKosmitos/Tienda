@@ -135,28 +135,32 @@ def _hoja_mas_vendidos(hoja, desde, hasta, generado):
 
 def _hoja_inventario(hoja, generado, stock_bajo):
     productos = db.buscar_productos()
-    encabezados = ("ID", "Nombre", "Categoría", "Precio", "Stock", "Valor en Stock")
+    encabezados = ("ID", "Código", "Nombre", "Categoría", "Precio", "Stock", "Valor en Stock")
     fila = _preparar_hoja(hoja, f"Inventario (generado {generado})", encabezados)
 
     valor_total = 0.0
-    for id_producto, nombre, categoria, precio, stock in productos:
+    for p in productos:
+        precio, stock = p["precio"], p["stock"]
         valor = precio * stock
         valor_total += valor
-        for columna, dato in enumerate((id_producto, nombre, categoria, precio, stock, valor), start=1):
+        # El código va como texto, para que Excel no le quite los ceros iniciales
+        datos = (p["id"], p["codigo_barras"] or "", p["nombre"], p["categoria"], precio, stock, valor)
+        for columna, dato in enumerate(datos, start=1):
             hoja.cell(row=fila, column=columna, value=dato)
-        hoja.cell(row=fila, column=4).number_format = _formato_pesos(precio)
-        hoja.cell(row=fila, column=5).number_format = FORMATO_UNIDADES
-        hoja.cell(row=fila, column=6).number_format = _formato_pesos(valor)
+        hoja.cell(row=fila, column=2).number_format = "@"
+        hoja.cell(row=fila, column=5).number_format = _formato_pesos(precio)
+        hoja.cell(row=fila, column=6).number_format = FORMATO_UNIDADES
+        hoja.cell(row=fila, column=7).number_format = _formato_pesos(valor)
         if stock < stock_bajo:
-            hoja.cell(row=fila, column=5).font = ESTILO_STOCK_BAJO
+            hoja.cell(row=fila, column=6).font = ESTILO_STOCK_BAJO
         fila += 1
 
     _terminar_hoja(hoja, fila - 1, len(encabezados), (
-        7, _ancho([p[1] for p in productos] + ["Nombre"]), _ancho([p[2] for p in productos] + ["Categoría"]),
-        13, 10, 17
-    ), columnas_centradas=(1,))
+        7, 16, _ancho([p["nombre"] for p in productos] + ["Nombre"]),
+        _ancho([p["categoria"] for p in productos] + ["Categoría"]), 13, 10, 17
+    ), columnas_centradas=(1, 2))
 
-    _fila_total(hoja, fila + 1, 6, "Valor total del inventario", valor_total)
+    _fila_total(hoja, fila + 1, 7, "Valor total del inventario", valor_total)
     return len(productos)
 
 
