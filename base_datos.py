@@ -5,7 +5,11 @@ import sqlite3
 import unicodedata
 from datetime import datetime
 
-from formato import formatear_precio
+from formato import formatear_numero, formatear_precio
+
+# Límite de unidades por producto: evita números tan grandes que SQLite no
+# puede guardarlos (y que casi siempre son un error al escribir)
+STOCK_MAXIMO = 1_000_000
 
 def _ruta_db():
     """
@@ -113,6 +117,8 @@ def validar_producto(precio, stock):
         return "El precio debe ser mayor a 0."
     if stock < 0:
         return "El stock no puede ser negativo."
+    if stock > STOCK_MAXIMO:
+        return f"El stock no puede ser mayor a {formatear_numero(STOCK_MAXIMO)}."
     return None
 
 def _sin_tildes(texto):
@@ -398,6 +404,11 @@ def registrar_entrada(id_producto, cantidad):
                 return False, "Producto no encontrado."
 
             nombre_producto, stock_actual = res
+            if stock_actual + cantidad > STOCK_MAXIMO:
+                return False, (
+                    f"Con esa entrada, '{nombre_producto}' pasaría de "
+                    f"{formatear_numero(STOCK_MAXIMO)} unidades, que es el máximo permitido."
+                )
             cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, id_producto))
             _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, "Entrada")
 
