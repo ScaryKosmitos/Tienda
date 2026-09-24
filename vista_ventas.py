@@ -11,18 +11,14 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla, encabezado,
-    etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, texto_vacio,
+    COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas, avisar, con_desplazamiento,
+    crear_tabla, encabezado, etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px,
+    texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_recibo import mostrar_recibo
 from formato import describir_periodo, formatear_numero, formatear_precio
 from recibo import numero_recibo
-
-# La tabla muestra como máximo estas líneas (las más recientes). Con miles de
-# filas la ventana se pone lenta y puede colgarse; los totales sí cuentan
-# todas las ventas del período, y el Excel las exporta todas
-MAX_FILAS = 300
 
 
 class VistaVentas:
@@ -33,6 +29,14 @@ class VistaVentas:
         self.hasta = None
         # Líneas de venta marcadas para anular
         self.seleccion = set()
+        # La tabla muestra las ventas por tandas (las más recientes primero): la
+        # última mostrada y cuántas líneas tiene el período. Los totales sí cuentan
+        # todas las ventas del período, y el Excel las exporta todas
+        self.ultima_venta = None
+        self.lineas_periodo = 0
+        # Ranking completo del período (la tabla lo muestra por tandas)
+        self.ranking = []
+        self.total_ranking = 0
         # La primera vez que se entra se muestran las ventas de hoy
         self.primera_vez = True
 
@@ -144,12 +148,12 @@ class VistaVentas:
         )
         self.sin_ventas = texto_vacio(ft.Icons.RECEIPT_LONG_OUTLINED, "No hay ventas en este período")
         self.texto_total = ft.Text("", size=px(17), weight=ft.FontWeight.BOLD, color=COLOR_EXITO)
-        self.aviso_limite = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
+        self.pie_ventas = PieMostrarMas(self.mostrar_mas_ventas)
         return ft.Column(
             expand=True,
             controls=[
                 ft.Stack([con_desplazamiento(self.tabla_ventas), self.sin_ventas], expand=True),
-                self.aviso_limite,
+                self.pie_ventas.control,
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[self.texto_total, self.boton_anular],
@@ -164,10 +168,11 @@ class VistaVentas:
         )
         self.sin_ranking = texto_vacio(ft.Icons.EMOJI_EVENTS_OUTLINED, "No hay ventas en este período")
         self.texto_ranking = ft.Text("", size=px(15), weight=ft.FontWeight.BOLD)
+        self.pie_ranking = PieMostrarMas(self.mostrar_mas_ranking)
         return ft.Column(
             expand=True,
             controls=[ft.Stack([con_desplazamiento(self.tabla_ranking), self.sin_ranking], expand=True),
-                      self.texto_ranking],
+                      self.pie_ranking.control, self.texto_ranking],
         )
 
     # --- FILTROS Y CARGA DE DATOS ---
@@ -231,7 +236,7 @@ class VistaVentas:
         if fechas is None:
             return
         desde, hasta = fechas
-        ventas = db.obtener_ventas(desde, hasta, limite=MAX_FILAS)
+        ventas = db.obtener_ventas(desde, hasta, limite=FILAS_POR_TANDA)
         resumen = db.resumen_ventas(desde, hasta)
         ranking = db.obtener_mas_vendidos(desde, hasta)
 
@@ -245,13 +250,10 @@ class VistaVentas:
     def mostrar_ventas(self, ventas, resumen, periodo):
         """'ventas' son las líneas a mostrar (las más recientes) y 'resumen' los totales de todo el período."""
         self.tabla_ventas.rows = [self.fila_venta(v) for v in ventas]
+        self.ultima_venta = ventas[-1] if ventas else None
+        self.lineas_periodo = resumen["todas"]
         self.sin_ventas.visible = not ventas
-        self.aviso_limite.visible = resumen["todas"] > len(ventas)
-        self.aviso_limite.value = (
-            f"Se muestran las {formatear_numero(len(ventas))} líneas más recientes de "
-            f"{formatear_numero(resumen['todas'])}. Elige menos días para ver las demás "
-            "(los totales y el Excel sí incluyen todas)."
-        )
+        self.actualizar_pie_ventas()
         # Cuánto de lo vendido fue por Nequi o fiado (lo demás, en efectivo)
         partes = [f"{nombre}: {formatear_precio(resumen[clave])}"
                   for nombre, clave in (("Nequi", "nequi"), ("fiado", "fiado")) if resumen[clave]]
@@ -260,6 +262,25 @@ class VistaVentas:
             self.texto_total.value += f" (de eso {', '.join(partes)})"
         self.texto_total.value += f"  ·  {formatear_numero(resumen['lineas'])} líneas de venta"
         self.actualizar_boton_anular()
+
+    @manejar_errores_bd
+    def mostrar_mas_ventas(self):
+        """Agrega las siguientes ventas del período sin rehacer las filas que ya están."""
+        ventas = db.obtener_ventas(self.desde, self.hasta, limite=FILAS_POR_TANDA, despues_de=self.ultima_venta)
+        self.tabla_ventas.rows.extend(self.fila_venta(v) for v in ventas)
+        if ventas:
+            self.ultima_venta = ventas[-1]
+        else:
+            # Se anularon o borraron ventas mientras tanto: ya no hay más que mostrar
+            self.lineas_periodo = len(self.tabla_ventas.rows)
+        self.actualizar_pie_ventas()
+        self.page.update()
+
+    def actualizar_pie_ventas(self):
+        self.pie_ventas.actualizar(
+            len(self.tabla_ventas.rows), self.lineas_periodo, "líneas de venta",
+            " Los totales y el Excel sí incluyen todas.",
+        )
 
     def fila_venta(self, venta):
         anulada = bool(venta["anulada"])
@@ -310,20 +331,13 @@ class VistaVentas:
         self.boton_anular.content = f"Anular seleccionadas ({cantidad})" if cantidad else "Anular seleccionadas"
 
     def mostrar_ranking(self, ranking, periodo):
-        total_ranking = sum(fila["total"] for fila in ranking)
-        filas = []
-        for puesto, fila in enumerate(ranking, start=1):
-            porcentaje = f"{fila['total'] / total_ranking * 100:.1f} %".replace(".", ",") if total_ranking else "—"
-            medalla = {1: ft.Colors.AMBER, 2: ft.Colors.BLUE_GREY_300, 3: ft.Colors.BROWN_300}.get(puesto)
-            filas.append(ft.DataRow(cells=[
-                ft.DataCell(ft.Icon(ft.Icons.EMOJI_EVENTS, color=medalla, size=px(20)) if medalla else ft.Text(str(puesto))),
-                ft.DataCell(ft.Text(fila["nombre"], weight=ft.FontWeight.W_500)),
-                ft.DataCell(ft.Text(formatear_numero(fila["unidades"]))),
-                ft.DataCell(ft.Text(formatear_precio(fila["total"]))),
-                ft.DataCell(ft.Text(porcentaje)),
-            ]))
-        self.tabla_ranking.rows = filas
+        self.ranking = ranking
+        self.total_ranking = sum(fila["total"] for fila in ranking)
+        self.tabla_ranking.rows = [
+            self.fila_ranking(puesto) for puesto in range(1, min(len(ranking), FILAS_POR_TANDA) + 1)
+        ]
         self.sin_ranking.visible = not ranking
+        self.pie_ranking.actualizar(len(self.tabla_ranking.rows), len(ranking), "productos")
 
         if ranking:
             primero = ranking[0]
@@ -333,6 +347,28 @@ class VistaVentas:
             )
         else:
             self.texto_ranking.value = ""
+
+    def mostrar_mas_ranking(self):
+        mostrados = len(self.tabla_ranking.rows)
+        self.tabla_ranking.rows.extend(
+            self.fila_ranking(puesto)
+            for puesto in range(mostrados + 1, min(len(self.ranking), mostrados + FILAS_POR_TANDA) + 1)
+        )
+        self.pie_ranking.actualizar(len(self.tabla_ranking.rows), len(self.ranking), "productos")
+        self.page.update()
+
+    def fila_ranking(self, puesto):
+        fila = self.ranking[puesto - 1]
+        porcentaje = (f"{fila['total'] / self.total_ranking * 100:.1f} %".replace(".", ",")
+                      if self.total_ranking else "—")
+        medalla = {1: ft.Colors.AMBER, 2: ft.Colors.BLUE_GREY_300, 3: ft.Colors.BROWN_300}.get(puesto)
+        return ft.DataRow(cells=[
+            ft.DataCell(ft.Icon(ft.Icons.EMOJI_EVENTS, color=medalla, size=px(20)) if medalla else ft.Text(str(puesto))),
+            ft.DataCell(ft.Text(fila["nombre"], weight=ft.FontWeight.W_500)),
+            ft.DataCell(ft.Text(formatear_numero(fila["unidades"]))),
+            ft.DataCell(ft.Text(formatear_precio(fila["total"]))),
+            ft.DataCell(ft.Text(porcentaje)),
+        ])
 
     # --- ACCIONES ---
 

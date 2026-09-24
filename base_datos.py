@@ -614,7 +614,7 @@ def _filtro_fechas(desde, hasta, columna="fecha"):
     return condiciones, parametros
 
 
-def obtener_ventas(desde=None, hasta=None, limite=None):
+def obtener_ventas(desde=None, hasta=None, limite=None, despues_de=None):
     """
     Retorna las ventas ordenadas de más reciente a más antigua, con las
     columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada,
@@ -622,9 +622,14 @@ def obtener_ventas(desde=None, hasta=None, limite=None):
     cliente (nombre del cliente si la venta fue fiada, o None) y medio
     (EFECTIVO o NEQUI; None si fue fiada).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
-    'limite' retorna solo las más recientes (None = todas).
+    'limite' retorna solo las más recientes (None = todas). 'despues_de' es la
+    última venta ya mostrada (para el botón "Mostrar más"): se retornan las
+    anteriores a ella.
     """
     condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
+    if despues_de is not None:
+        condiciones.append("(v.fecha, v.id) < (?, ?)")
+        parametros += [despues_de["fecha"], despues_de["id"]]
 
     consulta = """
         SELECT v.id, v.producto_id, v.nombre_producto, v.cantidad, v.total, v.fecha, v.anulada, v.recibo_id,
@@ -636,7 +641,9 @@ def obtener_ventas(desde=None, hasta=None, limite=None):
     """
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
-    consulta += " ORDER BY v.id DESC"
+    # Por fecha (y no solo por id) para que SQLite recorra el índice de la fecha
+    # ya ordenado: si no, con un año de ventas tendría que ordenarlas todas
+    consulta += " ORDER BY v.fecha DESC, v.id DESC"
     if limite is not None:
         consulta += " LIMIT ?"
         parametros.append(limite)
@@ -806,14 +813,19 @@ def contar_entradas():
     finally:
         conexion.close()
 
-def obtener_entradas(limite=None):
+def obtener_entradas(limite=None, antes_de_id=None):
     """
     Retorna los movimientos de stock (entradas, stock inicial, ajustes
     manuales y anulaciones de ventas) como (id, nombre_producto, cantidad, fecha, motivo), del más
     reciente al más antiguo. 'limite' retorna solo los más recientes (None = todos).
+    'antes_de_id' retorna solo los anteriores a ese movimiento (para el botón "Mostrar más").
     """
-    consulta = "SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas ORDER BY id DESC"
+    consulta = "SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas"
     parametros = []
+    if antes_de_id is not None:
+        consulta += " WHERE id < ?"
+        parametros.append(antes_de_id)
+    consulta += " ORDER BY id DESC"
     if limite is not None:
         consulta += " LIMIT ?"
         parametros.append(limite)
@@ -842,6 +854,27 @@ def _validar_nombre_cliente(nombre):
         return "El nombre no puede tener más de 60 letras."
     return None
 
+def _leer_clientes(id_cliente=None):
+    """Clientes con lo que deben (todos, o solo 'id_cliente'), sin ordenar."""
+    consulta = """
+        SELECT c.id, c.nombre, COALESCE(SUM(CASE WHEN f.anulado = 0 THEN f.monto END), 0) AS debe,
+               MAX(f.fecha) AS ultimo
+        FROM clientes c LEFT JOIN fiado f ON f.cliente_id = c.id
+    """
+    parametros = []
+    if id_cliente is not None:
+        consulta += " WHERE c.id = ?"
+        parametros.append(id_cliente)
+    consulta += " GROUP BY c.id"
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(consulta, parametros)
+        # Se redondea para que las sumas de decimales no dejen deudas de $0,0000001
+        return [{**dict(fila), "debe": round(fila["debe"], 2)} for fila in cursor.fetchall()]
+    finally:
+        conexion.close()
+
 def obtener_clientes(texto=""):
     """
     Retorna los clientes como diccionarios con id, nombre, debe (lo que debe;
@@ -849,19 +882,7 @@ def obtener_clientes(texto=""):
     None), de quien más debe a quien menos y luego por nombre. 'texto' filtra
     por nombre sin importar tildes ni mayúsculas.
     """
-    conexion = conectar()
-    try:
-        cursor = conexion.cursor()
-        cursor.execute("""
-            SELECT c.id, c.nombre, COALESCE(SUM(CASE WHEN f.anulado = 0 THEN f.monto END), 0) AS debe,
-                   MAX(f.fecha) AS ultimo
-            FROM clientes c LEFT JOIN fiado f ON f.cliente_id = c.id
-            GROUP BY c.id
-        """)
-        # Se redondea para que las sumas de decimales no dejen deudas de $0,0000001
-        clientes = [{**dict(fila), "debe": round(fila["debe"], 2)} for fila in cursor.fetchall()]
-    finally:
-        conexion.close()
+    clientes = _leer_clientes()
 
     if texto.strip():
         buscado = sin_tildes(texto.strip())
@@ -871,7 +892,8 @@ def obtener_clientes(texto=""):
 
 def obtener_cliente(id_cliente):
     """El cliente (como en obtener_clientes) o None si no existe."""
-    return next((c for c in obtener_clientes() if c["id"] == id_cliente), None)
+    clientes = _leer_clientes(id_cliente)
+    return clientes[0] if clientes else None
 
 def agregar_cliente(nombre):
     """Retorna (exito: bool, mensaje: str, id_cliente o None)."""

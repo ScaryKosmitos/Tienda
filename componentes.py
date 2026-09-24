@@ -9,6 +9,8 @@ from functools import wraps
 
 import flet as ft
 
+from formato import formatear_numero
+
 # Los productos con menos unidades que esto se marcan en rojo
 STOCK_BAJO = 5
 
@@ -243,6 +245,31 @@ def crear_tabla(columnas, **opciones):
 def con_desplazamiento(tabla):
     """Envuelve una tabla para que se pueda desplazar si tiene muchas filas."""
     return ft.Column([ft.Row([tabla], scroll=ft.ScrollMode.AUTO)], scroll=ft.ScrollMode.AUTO, expand=True)
+
+
+# Las tablas largas muestran esta cantidad de filas y un botón para ver más. Cada
+# fila le cuesta a la pantalla: con cientos de filas de una vez, la tienda tarda
+# segundos en mostrarlas
+FILAS_POR_TANDA = 100
+
+
+class PieMostrarMas:
+    """
+    Aviso "Se muestran X de Y" con el botón "Mostrar más", para debajo de una
+    tabla larga. 'al_pulsar' agrega la siguiente tanda de filas a la tabla.
+    """
+
+    def __init__(self, al_pulsar):
+        self.texto = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT)
+        self.boton = ft.TextButton(f"Mostrar {FILAS_POR_TANDA} más", icon=ft.Icons.EXPAND_MORE,
+                                   on_click=lambda _: al_pulsar())
+        self.control = ft.Row([self.texto, self.boton], spacing=8, wrap=True, visible=False,
+                              vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+    def actualizar(self, mostradas, total, que="filas", nota=""):
+        """Muestra el pie solo si quedan filas sin mostrar."""
+        self.control.visible = total > mostradas
+        self.texto.value = f"Se muestran {formatear_numero(mostradas)} de {formatear_numero(total)} {que}.{nota}"
 
 
 def texto_vacio(icono, mensaje):

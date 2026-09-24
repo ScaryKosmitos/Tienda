@@ -10,6 +10,10 @@ import base_datos as db
 from componentes import COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, px
 from formato import formatear_numero, formatear_precio, leer_precio, sin_tildes
 
+# La lista para elegir cliente muestra como máximo estos; los demás se encuentran
+# escribiendo el nombre (con cientos de clientes, armar la lista con cada tecla tarda)
+MAX_EN_LISTA = 30
+
 
 def texto_deuda(debe):
     """'Debe $15.000', 'Al día' o 'A favor $2.000', con su color."""
@@ -36,6 +40,7 @@ async def elegir_cliente(page, titulo):
     boton_nuevo = ft.FilledButton(icon=ft.Icons.PERSON_ADD_ALT, visible=False)
     sin_clientes = ft.Text("Todavía no hay clientes: escribe el nombre para crear uno.",
                            color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
+    hay_mas = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
 
     def filtrar(_=None):
         texto = campo.value.strip()
@@ -45,7 +50,7 @@ async def elegir_cliente(page, titulo):
             mostrar_error_bd(page, error)
             return
         lista.controls = []
-        for cliente in clientes:
+        for cliente in clientes[:MAX_EN_LISTA]:
             deuda, color = texto_deuda(cliente["debe"])
             lista.controls.append(ft.ListTile(
                 leading=icono_px(ft.Icons.PERSON_OUTLINE, 24),
@@ -58,6 +63,8 @@ async def elegir_cliente(page, titulo):
         boton_nuevo.visible = bool(texto) and not existe
         boton_nuevo.content = f"Nuevo cliente: {' '.join(texto.split())}"
         sin_clientes.visible = not clientes and not texto
+        hay_mas.visible = len(clientes) > MAX_EN_LISTA
+        hay_mas.value = f"Hay {formatear_numero(len(clientes))} clientes: escribe el nombre para encontrarlo."
         page.update()
 
     def crear(_=None):
@@ -92,7 +99,7 @@ async def elegir_cliente(page, titulo):
     page.show_dialog(ft.AlertDialog(
         title=ft.Text(titulo),
         content=ft.Column(
-            [campo, boton_nuevo, sin_clientes, lista],
+            [campo, boton_nuevo, sin_clientes, lista, hay_mas],
             tight=True, spacing=12, width=px(460), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         ),
         actions=[ft.TextButton("Cancelar", on_click=lambda _: terminar(None))],

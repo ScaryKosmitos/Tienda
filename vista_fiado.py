@@ -2,12 +2,14 @@
 Pantalla del fiado: lista de clientes con lo que debe cada uno y, del cliente
 elegido, sus movimientos (fiados, abonos y ventas anuladas) y los abonos.
 """
+import asyncio
+
 import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, avisar, con_desplazamiento, crear_tabla, encabezado, icono_px, manejar_errores_bd,
-    mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
+    COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento, crear_tabla, encabezado,
+    icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_cliente import pedir_abono, pedir_texto, texto_deuda
@@ -18,12 +20,19 @@ from formato import formatear_numero, formatear_precio
 # lista siga ágil con clientes de muchos años
 MAX_MOVIMIENTOS = 100
 
+# Segundos que espera el buscador después de la última tecla antes de filtrar
+ESPERA_BUSQUEDA = 0.3
+
 
 class VistaFiado:
     def __init__(self, page):
         self.page = page
         # Cliente que se está mostrando a la derecha (None = ninguno)
         self.id_cliente = None
+        # Clientes que cumplen los filtros (la tabla los muestra por tandas)
+        self.clientes = []
+        # Cuenta las teclas del buscador, para filtrar solo cuando se deja de escribir
+        self.teclas_busqueda = 0
 
         tarjeta_total, self.valor_total = tarjeta_resumen(
             ft.Icons.MENU_BOOK_OUTLINED, "Total fiado (lo que deben)", ft.Colors.ORANGE)
@@ -55,19 +64,21 @@ class VistaFiado:
     def crear_panel_clientes(self):
         self.campo_buscar = ft.TextField(
             hint_text="Buscar cliente…", prefix_icon=icono_px(ft.Icons.SEARCH), filled=True, dense=True,
-            expand=True, on_change=lambda _: self.cargar_clientes(),
+            expand=True, on_change=self.al_escribir_busqueda,
         )
         self.check_deben = ft.Checkbox(label="Solo los que deben", value=True,
                                        on_change=lambda _: self.cargar_clientes())
         self.tabla = crear_tabla([("Cliente", False), ("Debe", True), ("Último movimiento", False)],
                                  show_checkbox_column=False)
         self.sin_clientes = texto_vacio(ft.Icons.PEOPLE_OUTLINE, "No hay clientes que coincidan")
+        self.pie_tabla = PieMostrarMas(self.mostrar_mas_clientes)
         return panel(
             ft.Column(
                 spacing=16,
                 controls=[
                     ft.Row([self.campo_buscar, self.check_deben], spacing=12),
                     ft.Stack([con_desplazamiento(self.tabla), self.sin_clientes], expand=True),
+                    self.pie_tabla.control,
                 ],
             ),
             expand=True,
@@ -125,10 +136,12 @@ class VistaFiado:
         self.valor_total.value = formatear_precio(sum(c["debe"] for c in deudores))
         self.valor_deudores.value = formatear_numero(len(deudores))
 
-        clientes = db.obtener_clientes(self.campo_buscar.value)
+        clientes = db.obtener_clientes(self.campo_buscar.value) if self.campo_buscar.value.strip() else todos
         if self.check_deben.value:
             clientes = [c for c in clientes if c["debe"] > 0]
-        self.tabla.rows = [self.fila_cliente(c) for c in clientes]
+        self.clientes = clientes
+        self.tabla.rows = [self.fila_cliente(c) for c in clientes[:FILAS_POR_TANDA]]
+        self.pie_tabla.actualizar(len(self.tabla.rows), len(clientes), "clientes")
         self.sin_clientes.visible = not clientes
         self.sin_clientes.controls[1].value = (
             "Nadie debe nada" if self.check_deben.value and not self.campo_buscar.value.strip()
@@ -136,9 +149,25 @@ class VistaFiado:
         )
         self.page.update()
 
+    async def al_escribir_busqueda(self, _e):
+        """Filtra cuando se deja de escribir, no con cada tecla."""
+        self.teclas_busqueda += 1
+        tecla = self.teclas_busqueda
+        await asyncio.sleep(ESPERA_BUSQUEDA)
+        if tecla == self.teclas_busqueda:
+            self.cargar_clientes()
+
+    def mostrar_mas_clientes(self):
+        """Agrega la siguiente tanda de clientes sin rehacer las filas que ya están."""
+        mostrados = len(self.tabla.rows)
+        self.tabla.rows.extend(self.fila_cliente(c) for c in self.clientes[mostrados:mostrados + FILAS_POR_TANDA])
+        self.pie_tabla.actualizar(len(self.tabla.rows), len(self.clientes), "clientes")
+        self.page.update()
+
     def fila_cliente(self, cliente):
         deuda, color = texto_deuda(cliente["debe"])
         return ft.DataRow(
+            data=cliente["id"],
             selected=cliente["id"] == self.id_cliente,
             on_select_change=lambda _, i=cliente["id"]: self.elegir_cliente(i),
             cells=[
@@ -150,8 +179,10 @@ class VistaFiado:
         )
 
     def elegir_cliente(self, id_cliente):
+        # Solo cambia la fila resaltada: no hace falta volver a armar la tabla
         self.id_cliente = id_cliente
-        self.cargar_clientes()
+        for fila in self.tabla.rows:
+            fila.selected = fila.data == id_cliente
         self.mostrar_cliente()
 
     @manejar_errores_bd
@@ -236,7 +267,9 @@ class VistaFiado:
 
         if await pedir_texto(self.page, "Nuevo cliente", "Nombre del cliente", guardar):
             avisar(self.page, "Cliente agregado")
-            self.elegir_cliente(nuevo["id"])
+            # Se recarga la tabla para que aparezca el cliente nuevo, ya elegido
+            self.id_cliente = nuevo["id"]
+            self.mostrar()
 
     @manejar_errores_bd
     async def renombrar_cliente(self, _e):

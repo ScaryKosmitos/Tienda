@@ -9,9 +9,9 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla,
-    encabezado, escala, etiqueta, icono_px, manejar_errores_bd, mostrar_error_bd, mostrar_mensaje, panel, preguntar, px,
-    tarjeta_resumen, texto_vacio,
+    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas, avisar,
+    con_desplazamiento, crear_tabla, encabezado, escala, etiqueta, icono_px, manejar_errores_bd, mostrar_error_bd,
+    mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_pago import pedir_pago
@@ -26,10 +26,6 @@ CLAVES_ORDEN = [
     lambda p: p["stock"],
     lambda p: p["codigo_barras"] or "",
 ]
-
-# La tabla muestra como máximo estas filas, para que siga siendo ágil con
-# inventarios muy grandes; para ver otras se usa el buscador o los filtros
-MAX_FILAS = 300
 
 # Segundos que espera el buscador después de la última tecla antes de filtrar
 ESPERA_BUSQUEDA = 0.3
@@ -47,6 +43,8 @@ class VistaInventario:
         self.orden_ascendente = True
         # Cuenta las teclas del buscador, para filtrar solo cuando se deja de escribir
         self.teclas_busqueda = 0
+        # Productos que cumplen los filtros, en el orden de la tabla (se muestran por tandas)
+        self.productos_filtrados = []
 
         tarjeta_productos, self.valor_productos = tarjeta_resumen(
             ft.Icons.INVENTORY_2_OUTLINED, "Productos", ft.Colors.INDIGO)
@@ -102,7 +100,7 @@ class VistaInventario:
             columna.on_sort = self.ordenar_por_columna
 
         self.sin_productos = texto_vacio(ft.Icons.SEARCH_OFF, "No hay productos que coincidan")
-        self.aviso_limite = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
+        self.pie_tabla = PieMostrarMas(self.mostrar_mas_productos)
         if escala() > 1:
             # Con letra grande no caben en una línea: el buscador va arriba, a lo ancho
             filtros = ft.Column([
@@ -117,7 +115,7 @@ class VistaInventario:
                 controls=[
                     filtros,
                     ft.Stack([con_desplazamiento(self.tabla), self.sin_productos], expand=True),
-                    self.aviso_limite,
+                    self.pie_tabla.control,
                 ],
             ),
             expand=True,
@@ -205,7 +203,8 @@ class VistaInventario:
         if self.columna_ordenada is not None:
             productos = sorted(productos, key=CLAVES_ORDEN[self.columna_ordenada], reverse=not self.orden_ascendente)
 
-        self.tabla.rows = [self.fila_producto(p) for p in productos[:MAX_FILAS]]
+        self.productos_filtrados = productos
+        self.tabla.rows = [self.fila_producto(p) for p in productos[:FILAS_POR_TANDA]]
         self.sin_productos.visible = not productos
         # Sin filtros, una tabla vacía es que todavía no se ha registrado ningún producto
         hay_filtros = self.campo_buscar.value.strip() or categoria != "Todas" or self.check_stock_bajo.value
@@ -215,12 +214,21 @@ class VistaInventario:
         else:
             icono.icon = ft.Icons.INVENTORY_2_OUTLINED
             mensaje.value = "Todavía no hay productos.\nPulsa «Nuevo producto» para agregar el primero."
-        self.aviso_limite.visible = len(productos) > MAX_FILAS
-        self.aviso_limite.value = (
-            f"Se muestran {formatear_numero(MAX_FILAS)} de {formatear_numero(len(productos))} productos. "
-            "Usa el buscador o los filtros para encontrar los demás."
-        )
+        self.actualizar_pie_tabla()
         self.page.update()
+
+    def mostrar_mas_productos(self):
+        """Agrega la siguiente tanda de filas sin rehacer las que ya están."""
+        mostradas = len(self.tabla.rows)
+        self.tabla.rows.extend(
+            self.fila_producto(p) for p in self.productos_filtrados[mostradas:mostradas + FILAS_POR_TANDA]
+        )
+        self.actualizar_pie_tabla()
+        self.page.update()
+
+    def actualizar_pie_tabla(self):
+        self.pie_tabla.actualizar(len(self.tabla.rows), len(self.productos_filtrados), "productos",
+                                  " Usa el buscador para encontrar uno más rápido.")
 
     def fila_producto(self, p):
         bajo = p["stock"] < STOCK_BAJO

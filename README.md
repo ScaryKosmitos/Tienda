@@ -47,9 +47,9 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 
 **Reportes**
 - Historial de ventas con filtros de fecha (hoy, esta semana, este mes o un rango). Abre mostrando las
-  de hoy. Para que siga ágil con años de ventas, la tabla muestra las 300 líneas más recientes del
-  período (Entradas y los movimientos de cada cliente del fiado también se limitan); los totales y el
-  Excel sí incluyen todo.
+  de hoy. Para que siga ágil con años de ventas, las tablas largas (ventas, más vendidos, productos,
+  clientes y entradas) muestran 100 filas y un botón «Mostrar 100 más»; los movimientos de cada
+  cliente del fiado se limitan a los 100 más recientes. Los totales y el Excel sí incluyen todo.
 - Ranking de productos más vendidos del período, con el porcentaje de lo vendido.
 - Exportación a Excel (.xlsx) con cuatro hojas: ventas (con el medio de pago y lo fiado), más vendidos, inventario
   con su valor en stock y fiado (lo que debe cada cliente).
