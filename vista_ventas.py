@@ -105,12 +105,13 @@ class VistaVentas:
         self.campo_desde = self.campo_fecha("Desde")
         self.campo_hasta = self.campo_fecha("Hasta")
 
-        hoy = date.today()
+        # Las fechas se calculan al hacer clic (hoy = el día de la venta), no al
+        # abrir la tienda: así siguen bien aunque quede abierta de un día para otro
         botones_rapidos = (
-            ("Hoy", hoy, hoy),
-            ("Esta semana", hoy - timedelta(days=hoy.weekday()), hoy),
-            ("Este mes", hoy.replace(day=1), hoy),
-            ("Todo", None, None),
+            ("Hoy", lambda hoy: hoy),
+            ("Esta semana", lambda hoy: hoy - timedelta(days=hoy.weekday())),
+            ("Este mes", lambda hoy: hoy.replace(day=1)),
+            ("Todo", None),
         )
         return ft.Row(
             spacing=10,
@@ -121,8 +122,8 @@ class VistaVentas:
                 ft.FilledButton("Filtrar", icon=ft.Icons.FILTER_ALT_OUTLINED, on_click=lambda _: self.cargar()),
                 ft.VerticalDivider(width=12),
                 *[
-                    ft.OutlinedButton(texto, on_click=lambda _, d=desde, h=hasta: self.poner_fechas(d, h))
-                    for texto, desde, hasta in botones_rapidos
+                    ft.OutlinedButton(texto, on_click=lambda _, i=inicio: self.poner_periodo(i))
+                    for texto, inicio in botones_rapidos
                 ],
             ],
         )
@@ -164,6 +165,14 @@ class VistaVentas:
     def mostrar(self):
         """Se llama cada vez que se entra a esta pantalla."""
         self.cargar()
+
+    def poner_periodo(self, inicio):
+        """'inicio(hoy)' da la primera fecha del período, que termina hoy; None = todo el historial."""
+        if inicio is None:
+            self.poner_fechas(None, None)
+        else:
+            hoy = date.today()
+            self.poner_fechas(inicio(hoy), hoy)
 
     def poner_fechas(self, desde, hasta):
         self.campo_desde.value = desde.strftime("%Y-%m-%d") if desde else ""

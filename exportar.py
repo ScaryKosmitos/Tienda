@@ -33,6 +33,18 @@ def _formato_pesos(valor):
     return '"$"#,##0' if float(valor).is_integer() else '"$"#,##0.00'
 
 
+def _escribir(hoja, fila, columna, valor):
+    """
+    Escribe un dato en una celda. Un texto que empieza con '=' (ej: un producto
+    llamado '=Promo 2x1') se guarda como texto: si no, Excel lo tomaría como
+    fórmula y diría que el archivo está dañado.
+    """
+    celda = hoja.cell(row=fila, column=columna, value=valor)
+    if isinstance(valor, str) and valor.startswith("="):
+        celda.data_type = "s"
+    return celda
+
+
 def _preparar_hoja(hoja, titulo, encabezados):
     """Escribe el título en la fila 1 y los encabezados en la fila 3. Retorna la fila donde empiezan los datos."""
     hoja["A1"] = titulo
@@ -93,7 +105,7 @@ def _hoja_ventas(hoja, desde, hasta, generado):
             venta["cantidad"], total, "Anulada" if anulada else "OK",
         )
         for columna, valor in enumerate(valores, start=1):
-            celda = hoja.cell(row=fila, column=columna, value=valor)
+            celda = _escribir(hoja, fila, columna, valor)
             if anulada:
                 celda.font = ESTILO_ANULADA
         hoja.cell(row=fila, column=3).number_format = FORMATO_FECHA
@@ -122,7 +134,7 @@ def _hoja_mas_vendidos(hoja, desde, hasta, generado):
     for puesto, (nombre, unidades, total) in enumerate(ranking, start=1):
         porcentaje = total / total_general if total_general else 0
         for columna, valor in enumerate((puesto, nombre, unidades, total, porcentaje), start=1):
-            hoja.cell(row=fila, column=columna, value=valor)
+            _escribir(hoja, fila, columna, valor)
         hoja.cell(row=fila, column=3).number_format = FORMATO_UNIDADES
         hoja.cell(row=fila, column=4).number_format = _formato_pesos(total)
         hoja.cell(row=fila, column=5).number_format = FORMATO_PORCENTAJE
@@ -146,7 +158,7 @@ def _hoja_inventario(hoja, generado, stock_bajo):
         # El código va como texto, para que Excel no le quite los ceros iniciales
         datos = (p["id"], p["codigo_barras"] or "", p["nombre"], p["categoria"], precio, stock, valor)
         for columna, dato in enumerate(datos, start=1):
-            hoja.cell(row=fila, column=columna, value=dato)
+            _escribir(hoja, fila, columna, dato)
         hoja.cell(row=fila, column=2).number_format = "@"
         hoja.cell(row=fila, column=5).number_format = _formato_pesos(precio)
         hoja.cell(row=fila, column=6).number_format = FORMATO_UNIDADES

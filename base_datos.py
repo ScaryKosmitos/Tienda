@@ -13,6 +13,10 @@ from formato import clave_orden, formatear_cambio, formatear_numero, formatear_p
 STOCK_MAXIMO = 1_000_000
 PRECIO_MAXIMO = 100_000_000
 
+# El cambio de una venta no puede pasar de esto. Si pasa, casi seguro se
+# escaneó un código de barras en el campo del pago (ej: 7702004003501)
+CAMBIO_MAXIMO = 1_000_000
+
 # Códigos de barras: números (EAN-13, UPC...) o letras, números y guiones (Code 128)
 _CODIGO_VALIDO = re.compile(r"[0-9A-Za-z-]{1,32}")
 
@@ -127,14 +131,14 @@ def inicializar_db():
 
 def _categoria_existente(cursor, categoria, excluir_id=None):
     """
-    Si ya existe una categoría igual sin importar mayúsculas (ej: 'salsas'
-    y 'Salsas'), retorna la que ya existe para no crear duplicados.
+    Si ya existe una categoría igual sin importar mayúsculas ni tildes (ej:
+    'lacteos' y 'Lácteos'), retorna la que ya existe para no crear duplicados.
     'excluir_id' ignora al producto que se está editando, para que pueda
     corregir la forma de escribir su propia categoría.
     """
     cursor.execute("SELECT DISTINCT categoria FROM productos WHERE id != ?", (excluir_id or -1,))
     for (existente,) in cursor.fetchall():
-        if existente.casefold() == categoria.casefold():
+        if sin_tildes(existente) == sin_tildes(categoria):
             return existente
     return categoria
 
@@ -231,8 +235,8 @@ def _mensaje_repetido(existente):
     return f"Ya existe un producto llamado '{existente}'. Usa otro nombre o edita el que ya existe."
 
 def categoria_es_nueva(categoria):
-    """True si no hay ningún producto con esa categoría (sin importar mayúsculas)."""
-    return all(c.casefold() != categoria.casefold() for c in obtener_categorias())
+    """True si no hay ningún producto con esa categoría (sin importar mayúsculas ni tildes)."""
+    return all(sin_tildes(c) != sin_tildes(categoria) for c in obtener_categorias())
 
 def agregar_producto(nombre, categoria, precio, stock, codigo=None):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
@@ -400,6 +404,18 @@ def obtener_producto(id_producto):
         conexion.close()
 
 
+def validar_pago(pago, total):
+    """Retorna un mensaje de error si el pago no alcanza o es exagerado, o None si está bien."""
+    if round(pago, 2) < round(total, 2):
+        return f"Faltan {formatear_precio(total - pago)} para completar el pago."
+    if pago - total > CAMBIO_MAXIMO:
+        return (
+            f"El cambio pasaría de {formatear_precio(CAMBIO_MAXIMO)}. "
+            "¿Se escaneó un código de barras en este campo? Revisa con cuánto paga el cliente."
+        )
+    return None
+
+
 def registrar_venta_carrito(items, pago=None):
     """
     Registra la venta de varios productos a la vez. 'items' es una lista de
@@ -448,10 +464,10 @@ def registrar_venta_carrito(items, pago=None):
 
             if pago is None:
                 pago = total_venta
-            elif round(pago, 2) < round(total_venta, 2):
-                raise _VentaRechazada(
-                    f"El pago ({formatear_precio(pago)}) no alcanza para el total ({formatear_precio(total_venta)})."
-                )
+            else:
+                error = validar_pago(pago, total_venta)
+                if error:
+                    raise _VentaRechazada(error)
             cursor.execute("UPDATE recibos SET total = ?, pago = ? WHERE id = ?", (total_venta, pago, id_recibo))
 
         return True, f"Venta realizada. Total: {formatear_precio(total_venta)}", id_recibo
@@ -572,7 +588,14 @@ def anular_ventas(ids_venta):
                 if anulada:
                     raise _VentaRechazada(f"La venta {id_venta} ({nombre_producto}) ya estaba anulada.")
 
-                cursor.execute("UPDATE productos SET stock = stock + ? WHERE id = ?", (cantidad, producto_id))
+                cursor.execute("SELECT stock FROM productos WHERE id = ?", (producto_id,))
+                (stock_actual,) = cursor.fetchone()
+                if stock_actual + cantidad > STOCK_MAXIMO:
+                    raise _VentaRechazada(
+                        f"Al anular, '{nombre_producto}' pasaría de {formatear_numero(STOCK_MAXIMO)} unidades, "
+                        "que es el máximo permitido. Corrige primero su stock."
+                    )
+                cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, producto_id))
                 cursor.execute("UPDATE ventas SET anulada = 1 WHERE id = ?", (id_venta,))
                 _registrar_movimiento(cursor, producto_id, nombre_producto, cantidad, "Anulación de venta")
                 total_devuelto += total

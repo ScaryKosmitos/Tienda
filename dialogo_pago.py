@@ -6,15 +6,12 @@ import asyncio
 
 import flet as ft
 
+import base_datos as db
 from componentes import COLOR_EXITO, COLOR_PELIGRO, icono_px, px
 from formato import formatear_numero, formatear_precio, leer_precio
 
 # Botones de billetes (y la moneda de $1.000): cada toque suma al monto recibido
 BILLETES = [1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000]
-
-
-def _alcanza(pago, total):
-    return round(pago, 2) >= round(total, 2)
 
 
 async def pedir_pago(page, total):
@@ -40,8 +37,8 @@ async def pedir_pago(page, total):
         pago = leer_pago()
         if pago is None:
             texto_cambio.value, texto_cambio.color = "Cambio: —", None
-        elif not _alcanza(pago, total):
-            texto_cambio.value, texto_cambio.color = f"Faltan {formatear_precio(total - pago)}", COLOR_PELIGRO
+        elif error := db.validar_pago(pago, total):
+            texto_cambio.value, texto_cambio.color = error, COLOR_PELIGRO
         else:
             texto_cambio.value, texto_cambio.color = f"Cambio: {formatear_precio(pago - total)}", COLOR_EXITO
         page.update()
@@ -51,8 +48,8 @@ async def pedir_pago(page, total):
             campo_pago.error_text = "Escribe con cuánto paga el cliente."
         elif (pago := leer_pago()) is None:
             campo_pago.error_text = "Debe ser un número (ej: 20000 o 20.000)."
-        elif not _alcanza(pago, total):
-            campo_pago.error_text = f"Faltan {formatear_precio(total - pago)} para completar el pago."
+        elif error := db.validar_pago(pago, total):
+            campo_pago.error_text = error
         else:
             terminar(pago)
             return

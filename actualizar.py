@@ -67,8 +67,14 @@ def descargar(sha, carpeta_temporal):
     url = f"https://github.com/{REPOSITORIO}/archive/{referencia}.zip"
     paso("Descargando la versión nueva")
     ruta = os.path.join(carpeta_temporal, "tienda.zip")
-    with urllib.request.urlopen(url, timeout=120) as respuesta, open(ruta, "wb") as archivo:
-        shutil.copyfileobj(respuesta, archivo)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as respuesta, open(ruta, "wb") as archivo:
+            shutil.copyfileobj(respuesta, archivo)
+    except Exception as error:
+        raise SystemExit(
+            "\nERROR: no se pudo descargar la versión nueva. Revisa la conexión a internet "
+            f"e inténtalo de nuevo. No se cambió nada.\n(Detalle: {error})"
+        )
     return ruta
 
 
@@ -77,16 +83,19 @@ def leer_zip(ruta_zip):
     Retorna {ruta_relativa: contenido} con los archivos del programa que trae el ZIP.
     Los ZIP de GitHub guardan todo dentro de una carpeta (ej: 'Tienda-master/'), que se quita.
     """
-    with zipfile.ZipFile(ruta_zip) as archivo_zip:
-        nombres = [n for n in archivo_zip.namelist() if not n.endswith("/")]
-        raiz = os.path.commonpath(nombres).replace("\\", "/") if len(nombres) > 1 else ""
-        archivos = {}
-        for nombre in nombres:
-            relativa = nombre[len(raiz):].lstrip("/") if raiz else nombre
-            # Evita rutas que intenten salirse de la carpeta de la tienda
-            if not relativa or relativa.startswith("/") or ".." in relativa.split("/"):
-                continue
-            archivos[relativa] = archivo_zip.read(nombre)
+    try:
+        with zipfile.ZipFile(ruta_zip) as archivo_zip:
+            nombres = [n for n in archivo_zip.namelist() if not n.endswith("/")]
+            raiz = os.path.commonpath(nombres).replace("\\", "/") if len(nombres) > 1 else ""
+            archivos = {}
+            for nombre in nombres:
+                relativa = nombre[len(raiz):].lstrip("/") if raiz else nombre
+                # Evita rutas que intenten salirse de la carpeta de la tienda
+                if not relativa or relativa.startswith("/") or ".." in relativa.split("/"):
+                    continue
+                archivos[relativa] = archivo_zip.read(nombre)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise SystemExit(f"ERROR: no se pudo leer el ZIP {ruta_zip}. No se cambió nada.\n(Detalle: {error})")
     for necesario in ("main.py", "base_datos.py", "instalar.py"):
         if necesario not in archivos:
             raise SystemExit(f"ERROR: el ZIP no parece ser de la tienda (falta {necesario}). No se cambió nada.")
@@ -104,12 +113,24 @@ def respaldar_datos():
     print(f"Respaldo: {ruta}")
 
 
+def _mismo_contenido(ruta, contenido):
+    try:
+        with open(ruta, "rb") as archivo:
+            return archivo.read() == contenido
+    except OSError:
+        return False
+
+
 def instalar_archivos(archivos, anteriores):
     paso("Reemplazando los archivos del programa")
     for relativa, contenido in archivos.items():
         if es_protegido(relativa):
             continue
         destino = os.path.join(CARPETA, *relativa.split("/"))
+        # Los que no cambiaron no se tocan (entre ellos, casi siempre, el .bat que
+        # está ejecutando esta actualización)
+        if _mismo_contenido(destino, contenido):
+            continue
         os.makedirs(os.path.dirname(destino), exist_ok=True)
         # Se escribe primero en un archivo temporal para no dejar uno a medias si algo falla
         temporal = destino + ".nuevo"

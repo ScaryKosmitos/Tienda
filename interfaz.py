@@ -2,6 +2,7 @@
 Ventana principal: barra lateral de navegación y las tres pantallas
 (inventario y venta, historial de ventas y entradas de mercancía).
 """
+import asyncio
 import os
 
 import flet as ft
@@ -10,7 +11,8 @@ import base_datos as db
 import configuracion
 import respaldar
 from componentes import (
-    COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, icono_px, mostrar_mensaje, poner_escala, preguntar, px,
+    COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, hay_dialogo_abierto, icono_px, mostrar_mensaje, poner_escala,
+    preguntar, px,
 )
 from dialogo_clave import abrir_ajustes_clave
 from vista_entradas import VistaEntradas
@@ -18,6 +20,9 @@ from vista_inventario import VistaInventario
 from vista_ventas import VistaVentas
 
 INVENTARIO, VENTAS, ENTRADAS = range(3)
+
+# Cada cuánto se revisa si falta el respaldo del día (por si la tienda queda abierta varios días)
+SEGUNDOS_ENTRE_RESPALDOS = 60 * 60
 
 
 class Aplicacion:
@@ -133,6 +138,11 @@ class Aplicacion:
         """Vuelve a armar todas las pantallas con el nuevo tamaño, conservando el carrito."""
         if valor == escala():
             return
+        # Rearmar las pantallas con una ventana abierta (ej: el cobro) la dejaría
+        # trabajando sobre las pantallas viejas: el carrito quedaría desfasado
+        if hay_dialogo_abierto(self.page):
+            avisar(self.page, "Cierra la ventana abierta para cambiar el tamaño de letra.")
+            return
         poner_escala(valor)
         try:
             configuracion.guardar(escala=valor)
@@ -204,12 +214,21 @@ def main(page: ft.Page):
         return
 
     Aplicacion(page)
+    page.run_task(respaldar_cada_dia, page)
 
-    # Un fallo del respaldo no debe impedir usar la tienda: solo se avisa
-    try:
-        respaldar.respaldo_automatico()
-    except Exception as error:
-        avisar(page, f"No se pudo crear el respaldo de hoy: {error}", error=True)
+
+async def respaldar_cada_dia(page):
+    """
+    Hace el respaldo del día al abrir la tienda y, si queda abierta, vuelve a
+    revisar cada hora para hacer el del día siguiente. Un fallo del respaldo no
+    debe impedir usar la tienda: solo se avisa.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(respaldar.respaldo_automatico)
+        except Exception as error:
+            avisar(page, f"No se pudo crear el respaldo de hoy: {error}", error=True)
+        await asyncio.sleep(SEGUNDOS_ENTRE_RESPALDOS)
 
 
 def iniciar_app():

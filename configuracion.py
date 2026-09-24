@@ -37,5 +37,13 @@ def quitar(nombre):
 
 
 def _escribir(datos):
-    with open(_ruta(), "w", encoding="utf-8") as archivo:
+    # Se escribe primero en un archivo temporal y luego se reemplaza de una vez:
+    # si se va la luz a mitad de camino, queda el archivo anterior entero (con
+    # la clave), en vez de uno a medias que se leería como vacío
+    ruta = _ruta()
+    temporal = ruta + ".nuevo"
+    with open(temporal, "w", encoding="utf-8") as archivo:
         json.dump(datos, archivo, indent=2)
+        archivo.flush()
+        os.fsync(archivo.fileno())
+    os.replace(temporal, ruta)

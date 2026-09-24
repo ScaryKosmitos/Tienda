@@ -74,6 +74,13 @@ def crear_tema():
 
 # --- AVISOS Y PREGUNTAS ---
 
+def hay_dialogo_abierto(page):
+    """True si hay una ventana (diálogo) abierta; los avisos cortos de abajo no cuentan."""
+    # Flet no ofrece esto de forma pública: se revisa su lista interna de diálogos
+    dialogos = getattr(getattr(page, "_dialogs", None), "controls", [])
+    return any(d.open and not isinstance(d, ft.SnackBar) for d in dialogos)
+
+
 def avisar(page, mensaje, error=False):
     """Aviso corto en la parte de abajo que se quita solo."""
     page.show_dialog(ft.SnackBar(

@@ -22,7 +22,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Carrito con varios productos por venta. La venta es "todo o nada": si un producto no tiene
   stock suficiente, no se registra ninguno.
 - Cálculo del cambio al cobrar, según con cuánto paga el cliente. Botones de billetes ($1.000 a
-  $100.000) que se suman al tocarlos, para no tener que escribir el monto.
+  $100.000) que se suman al tocarlos, para no tener que escribir el monto. Si el cambio pasaría de
+  $1.000.000 no deja cobrar, porque casi seguro se escaneó un código de barras en el campo del pago.
 - Recibo de cada venta, con número, productos, total, dinero recibido y cambio. Se puede abrir
   en el navegador para imprimirlo o guardarlo como PDF, y volver a verlo desde el historial.
 - Anulación de ventas: las unidades vuelven al stock y la venta queda marcada como anulada (no se borra).
@@ -47,7 +48,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
   solo se pierde el tamaño de letra elegido) y volver a abrir la tienda.
 
 **Seguridad de los datos**
-- Respaldo automático de la base de datos una vez al día, al abrir la aplicación.
+- Respaldo automático de la base de datos una vez al día: al abrir la aplicación y, si queda abierta
+  de un día para otro, también al día siguiente.
 - Precios y cantidades en formato colombiano: `$1.500`, `$1.500,50`, `1.000 unidades`.
 - Validaciones para evitar datos incorrectos (precios en 0 o mayores a $100.000.000, stock negativo
   o mayor a 1.000.000).
