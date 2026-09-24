@@ -63,7 +63,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Con el **candado** de la barra lateral se crea una clave de 4 a 8 números. Desde entonces se pide para
   eliminar productos, cambiar el precio o el stock de un producto y anular ventas. Vender, registrar
   entradas y crear productos nuevos no la piden.
-- Después de escribirla bien no se vuelve a pedir durante 5 minutos (**Bloquear ahora** la pide de inmediato).
+- Queda activa hasta que se quite (también al cerrar y actualizar la tienda) y se pide **cada vez** que se hace
+  una de esas acciones, aunque se haya escrito hace poco.
 - Se guarda cifrada en `configuracion.json`. **Si se olvida**: cerrar la tienda, abrir `configuracion.json`
   con el Bloc de notas, borrar la parte `"clave": {...}` (o borrar el archivo entero: además de la clave,
   solo se pierde el tamaño de letra elegido) y volver a abrir la tienda.

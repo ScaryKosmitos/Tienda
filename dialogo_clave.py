@@ -19,10 +19,11 @@ def _campo_clave(etiqueta, **opciones):
 
 async def pedir_clave(page, motivo):
     """
-    Pide la clave antes de una acción delicada. Retorna True si se puede
-    seguir: no hay clave, se escribió hace poco, o se escribió bien ahora.
+    Pide la clave antes de una acción delicada (cada vez, aunque se haya
+    escrito hace poco). Retorna True si se puede seguir: no hay clave, o se
+    escribió bien.
     """
-    if seguridad.esta_desbloqueado():
+    if not seguridad.tiene_clave():
         return True
 
     resultado = asyncio.get_running_loop().create_future()
@@ -34,7 +35,6 @@ async def pedir_clave(page, motivo):
 
     def comprobar(_=None):
         if seguridad.verificar(campo.value):
-            seguridad.desbloquear()
             terminar(True)
         else:
             campo.error_text = "Clave incorrecta"
@@ -103,7 +103,7 @@ async def _crear_clave(page, titulo):
 
 
 async def abrir_ajustes_clave(page):
-    """Candado de la barra lateral: crear la clave o, con la clave actual, cambiarla, quitarla o bloquear."""
+    """Candado de la barra lateral: crear la clave o, con la clave actual, cambiarla o quitarla."""
     try:
         await _ajustes_clave(page)
     except OSError as error:
@@ -117,8 +117,6 @@ async def _ajustes_clave(page):
             avisar(page, "Clave creada")
         return
 
-    # Aquí se pide siempre, aunque se haya escrito hace poco
-    seguridad.bloquear()
     if not await pedir_clave(page, "Escribe la clave actual para cambiarla o quitarla."):
         return
 
@@ -133,14 +131,14 @@ async def _ajustes_clave(page):
         icon=icono_px(ft.Icons.LOCK_OUTLINE, 32),
         title=ft.Text("Clave"),
         content=ft.Text(
-            f"La clave está activa. Después de escribirla no se vuelve a pedir durante "
-            f"{seguridad.MINUTOS_DESBLOQUEO} minutos; 'Bloquear ahora' la vuelve a pedir de inmediato.",
+            "La clave está activa: se pide cada vez que se elimina un producto, se cambia un precio o "
+            "el stock, o se anula una venta, un abono o una salida de caja.",
             width=px(420),
         ),
         actions=[
             ft.TextButton("Quitar clave", on_click=lambda _: elegir("quitar")),
             ft.OutlinedButton("Cambiar clave", on_click=lambda _: elegir("cambiar")),
-            ft.FilledButton("Bloquear ahora", on_click=lambda _: elegir("bloquear")),
+            ft.FilledButton("Listo", on_click=lambda _: elegir(None)),
         ],
         on_dismiss=lambda _: eleccion.done() or eleccion.set_result(None),
     ))
@@ -154,6 +152,3 @@ async def _ajustes_clave(page):
                                                  "anular ventas sin clave. ¿Quitarla?", si="Quitar", peligro=True):
             seguridad.quitar_clave()
             avisar(page, "Se quitó la clave")
-    elif opcion == "bloquear":
-        seguridad.bloquear()
-        avisar(page, "Bloqueado: la clave se pedirá en la próxima acción delicada")
