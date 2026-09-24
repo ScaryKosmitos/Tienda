@@ -228,13 +228,15 @@ class VistaVentas:
         self.page.update()
 
     def mostrar_ventas(self, ventas, periodo):
-        dinero_total = sum(v["total"] for v in ventas if not v["anulada"])
-        lineas_validas = sum(1 for v in ventas if not v["anulada"])
+        validas = [v for v in ventas if not v["anulada"]]
+        dinero_total = sum(v["total"] for v in validas)
+        fiado = sum(v["total"] for v in validas if v["cliente"])
         self.tabla_ventas.rows = [self.fila_venta(v) for v in ventas]
         self.sin_ventas.visible = not ventas
-        self.texto_total.value = (
-            f"Total recaudado ({periodo}): {formatear_precio(dinero_total)}  ·  {lineas_validas} líneas de venta"
-        )
+        self.texto_total.value = f"Total vendido ({periodo}): {formatear_precio(dinero_total)}"
+        if fiado:
+            self.texto_total.value += f", de eso fiado: {formatear_precio(fiado)}"
+        self.texto_total.value += f"  ·  {len(validas)} líneas de venta"
         self.actualizar_boton_anular()
 
     def fila_venta(self, venta):
@@ -247,7 +249,7 @@ class VistaVentas:
                 ft.DataCell(ft.Text(formatear_numero(venta["cantidad"]), color=gris)),
                 ft.DataCell(ft.Text(formatear_precio(venta["total"]), color=gris)),
                 ft.DataCell(ft.Text(venta["fecha"], color=gris or ft.Colors.ON_SURFACE_VARIANT, size=px(13))),
-                ft.DataCell(etiqueta("Anulada", ft.Colors.OUTLINE) if anulada else etiqueta("OK", COLOR_EXITO)),
+                ft.DataCell(self.etiqueta_estado(venta)),
                 ft.DataCell(ft.IconButton(
                     ft.Icons.RECEIPT_OUTLINED, tooltip="Ver recibo",
                     on_click=lambda _, r=venta["recibo_id"]: self.ver_recibo(r),
@@ -266,6 +268,17 @@ class VistaVentas:
                 self.page.update()
             fila.on_select_change = al_marcar
         return fila
+
+    @staticmethod
+    def etiqueta_estado(venta):
+        if venta["anulada"]:
+            return etiqueta("Anulada", ft.Colors.OUTLINE)
+        if venta["cliente"]:
+            # Al pasar el mouse se ve a quién se le fió
+            pastilla = etiqueta("Fiado", ft.Colors.ORANGE_800)
+            pastilla.tooltip = f"Fiado a {venta['cliente']}"
+            return pastilla
+        return etiqueta("OK", COLOR_EXITO)
 
     def actualizar_boton_anular(self):
         cantidad = len(self.seleccion)
@@ -315,7 +328,8 @@ class VistaVentas:
             return
         if not await preguntar(
             self.page, "Anular ventas",
-            f"¿Anular {len(self.seleccion)} línea(s) de venta? Las unidades volverán al stock.",
+            f"¿Anular {len(self.seleccion)} línea(s) de venta? Las unidades volverán al stock "
+            "y, si la venta fue fiada, se le descontará al cliente de lo que debe.",
             si="Anular", peligro=True,
         ) or not await pedir_clave(self.page, "Anular ventas necesita la clave."):
             return
@@ -374,5 +388,5 @@ class VistaVentas:
         mostrar_mensaje(
             self.page, "Reporte Exportado",
             f"Se guardó el reporte ({describir_periodo(desde, hasta)}):\n{ruta}\n\n"
-            f"Hojas: Ventas ({cantidad_ventas} líneas), Más vendidos e Inventario ({cantidad_productos} productos).",
+            f"Hojas: Ventas ({cantidad_ventas} líneas), Más vendidos, Inventario ({cantidad_productos} productos) y Fiado.",
         )

@@ -1,6 +1,6 @@
 """
-Ventana principal: barra lateral de navegación y las tres pantallas
-(inventario y venta, historial de ventas y entradas de mercancía).
+Ventana principal: barra lateral de navegación y las cuatro pantallas
+(inventario y venta, historial de ventas, fiado y entradas de mercancía).
 """
 import asyncio
 import os
@@ -17,10 +17,11 @@ from componentes import (
 from dialogo_clave import abrir_ajustes_clave
 from dialogo_respaldo import abrir_ajustes_respaldo
 from vista_entradas import VistaEntradas
+from vista_fiado import VistaFiado
 from vista_inventario import VistaInventario
 from vista_ventas import VistaVentas
 
-INVENTARIO, VENTAS, ENTRADAS = range(3)
+INVENTARIO, VENTAS, FIADO, ENTRADAS = range(4)
 
 # Cada cuánto se revisa si falta el respaldo del día (por si la tienda queda abierta varios días)
 SEGUNDOS_ENTRE_RESPALDOS = 60 * 60
@@ -70,8 +71,10 @@ class Aplicacion:
 
         self.inventario = VistaInventario(page, abrir_entrada=self.abrir_entrada)
         self.ventas = VistaVentas(page)
+        self.fiado = VistaFiado(page)
         self.entradas = VistaEntradas(page)
-        self.vistas = [self.inventario, self.ventas, self.entradas]
+        # En el mismo orden que INVENTARIO, VENTAS, FIADO, ENTRADAS
+        self.vistas = [self.inventario, self.ventas, self.fiado, self.entradas]
 
         self.navegacion = ft.NavigationRail(
             selected_index=INVENTARIO,
@@ -115,6 +118,9 @@ class Aplicacion:
                 ft.NavigationRailDestination(
                     icon=icono_px(ft.Icons.RECEIPT_LONG_OUTLINED, 24), selected_icon=icono_px(ft.Icons.RECEIPT_LONG, 24),
                     label="Ventas"),
+                ft.NavigationRailDestination(
+                    icon=icono_px(ft.Icons.MENU_BOOK_OUTLINED, 24), selected_icon=icono_px(ft.Icons.MENU_BOOK, 24),
+                    label="Fiado"),
                 ft.NavigationRailDestination(
                     icon=icono_px(ft.Icons.MOVE_TO_INBOX_OUTLINED, 24), selected_icon=icono_px(ft.Icons.MOVE_TO_INBOX, 24),
                     label="Entradas"),

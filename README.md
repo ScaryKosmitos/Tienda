@@ -28,10 +28,19 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
   en el navegador para imprimirlo o guardarlo como PDF, y volver a verlo desde el historial.
 - Anulación de ventas: las unidades vuelven al stock y la venta queda marcada como anulada (no se borra).
 
+**Fiado**
+- Al cobrar, el botón **Fiar** le fía la venta completa a un cliente: se busca por nombre o se crea
+  escribiéndolo. El recibo dice a quién se le fió.
+- Pantalla **Fiado**: lo que debe cada cliente, el total fiado y los movimientos de cada uno (fiados,
+  abonos y ventas anuladas), con acceso a sus recibos.
+- Abonos parciales o **Paga todo**. Un abono registrado por error se anula (pide la clave) y la deuda vuelve a subir.
+- Si se anula una venta fiada, se le descuenta al cliente de lo que debe.
+
 **Reportes**
 - Historial de ventas con filtros de fecha (hoy, esta semana, este mes o un rango).
 - Ranking de productos más vendidos del período, con el porcentaje de lo vendido.
-- Exportación a Excel (.xlsx) con tres hojas: ventas, más vendidos e inventario con su valor en stock.
+- Exportación a Excel (.xlsx) con cuatro hojas: ventas (con lo fiado y a quién), más vendidos, inventario
+  con su valor en stock y fiado (lo que debe cada cliente).
 
 **Comodidad**
 - Tamaño de letra ajustable (Normal, Grande, Muy grande y Enorme) desde el botón **Tamaño de letra** (el ícono de las dos T) de la barra lateral
@@ -130,6 +139,8 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 | Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **Imprimir o guardar PDF** y luego Ctrl+P en el navegador. |
 | Ver un recibo anterior | En **Ventas** (barra lateral), pulsar el ícono de recibo de la venta. |
 | Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas** (pide la clave si hay una). |
+| Fiar una venta | Al cobrar, pulsar **Fiar**, elegir el cliente (o escribir su nombre para crearlo) y confirmar. |
+| Registrar un abono | Ir a **Fiado**, elegir el cliente y pulsar **Registrar abono** (o **Paga todo** si paga lo que debe). |
 | Crear, cambiar o quitar la clave | Pulsar el **candado** de la barra lateral. |
 | Ver ventas, ranking o exportar | Ir a **Ventas**, elegir el período (o el calendario) y usar las pestañas o **Exportar a Excel**. |
 
@@ -144,10 +155,12 @@ Tienda/
 ├── interfaz.py          Ventana principal: barra lateral, cambio de pantalla y cierre
 ├── vista_inventario.py  Pantalla principal: resumen, tabla de productos, formulario y carrito
 ├── vista_ventas.py      Historial de ventas, más vendidos, anulaciones y exportación
+├── vista_fiado.py       Fiado: lo que debe cada cliente, sus movimientos y los abonos
 ├── vista_entradas.py    Entradas de mercancía y movimientos de stock
 ├── dialogo_pago.py      Diálogo de cobro con botones de billetes y el cálculo del cambio
 ├── dialogo_clave.py     Diálogos para pedir la clave y para crearla, cambiarla o quitarla
 ├── dialogo_recibo.py    Diálogo que muestra el recibo de una venta
+├── dialogo_cliente.py   Diálogos del fiado: elegir o crear el cliente, cambiar su nombre y registrar abonos
 ├── dialogo_respaldo.py  Diálogo del respaldo en la nube: elegir la carpeta de Google Drive y respaldar ahora
 ├── componentes.py       Piezas compartidas por las pantallas (tablas, tarjetas, avisos, preguntas)
 │
@@ -179,11 +192,15 @@ Por eso la lógica de datos puede usarse o probarse sin abrir ninguna ventana.
 `inventario.db` tiene cuatro tablas:
 
 - **productos**: id, nombre, categoría, precio, stock y código de barras (opcional, sin repetir).
-- **recibos**: uno por venta, con la fecha, el total y el dinero que entregó el cliente.
+- **recibos**: uno por venta, con la fecha, el total, el dinero que entregó el cliente y, si la venta
+  fue fiada, a qué cliente.
 - **ventas**: una línea por producto vendido, con cantidad, total, fecha, si fue anulada y el recibo
   al que pertenece. Guarda también el nombre del producto, para que el historial se entienda aunque
   luego cambie.
 - **entradas**: movimientos de stock (stock inicial, entradas de mercancía, ajustes manuales y anulaciones de ventas).
+- **clientes**: los clientes a los que se les fía (solo el nombre, sin repetir).
+- **fiado**: la cuenta de cada cliente. Lo fiado suma y los abonos y las ventas anuladas restan; lo que
+  debe es la suma. Los abonos registrados por error se marcan como anulados, no se borran.
 
 Un producto que ya tiene ventas no se puede eliminar, para no dejar el historial incompleto.
 

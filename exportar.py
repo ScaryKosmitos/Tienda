@@ -1,7 +1,7 @@
 """
-Exporta los datos de la tienda a un archivo de Excel (.xlsx) con tres hojas:
-Ventas (del período elegido), Más vendidos (del mismo período) e Inventario
-(estado actual). Los números se guardan como números, para que en Excel se
+Exporta los datos de la tienda a un archivo de Excel (.xlsx) con cuatro hojas:
+Ventas (del período elegido), Más vendidos (del mismo período), Inventario y
+Fiado (estado actual). Los números se guardan como números, para que en Excel se
 puedan sumar, filtrar u ordenar.
 """
 from datetime import datetime
@@ -89,12 +89,12 @@ def _ancho(textos, minimo=10, maximo=45):
 
 def _hoja_ventas(hoja, desde, hasta, generado):
     ventas = db.obtener_ventas(desde, hasta)
-    encabezados = ("ID Venta", "Recibo", "Fecha y Hora", "Producto", "Cantidad", "Total", "Estado")
+    encabezados = ("ID Venta", "Recibo", "Fecha y Hora", "Producto", "Cantidad", "Total", "Estado", "Fiado a")
     fila = _preparar_hoja(
         hoja, f"Ventas: {describir_periodo(desde, hasta)} (generado {generado})", encabezados
     )
 
-    total_recaudado = 0.0
+    total_vendido = total_fiado = 0.0
     # obtener_ventas las da de la más reciente a la más antigua; en Excel se
     # leen mejor en orden cronológico
     for venta in reversed(ventas):
@@ -102,7 +102,8 @@ def _hoja_ventas(hoja, desde, hasta, generado):
         valores = (
             venta["id"], numero_recibo(venta["recibo_id"]) if venta["recibo_id"] else "—",
             datetime.strptime(venta["fecha"], "%Y-%m-%d %H:%M:%S"), venta["nombre_producto"],
-            venta["cantidad"], total, "Anulada" if anulada else "OK",
+            venta["cantidad"], total, "Anulada" if anulada else ("Fiado" if venta["cliente"] else "OK"),
+            venta["cliente"] or "",
         )
         for columna, valor in enumerate(valores, start=1):
             celda = _escribir(hoja, fila, columna, valor)
@@ -112,14 +113,19 @@ def _hoja_ventas(hoja, desde, hasta, generado):
         hoja.cell(row=fila, column=5).number_format = FORMATO_UNIDADES
         hoja.cell(row=fila, column=6).number_format = _formato_pesos(total)
         if not anulada:
-            total_recaudado += total
+            total_vendido += total
+            if venta["cliente"]:
+                total_fiado += total
         fila += 1
 
     _terminar_hoja(hoja, fila - 1, len(encabezados), (
-        10, 10, 18, _ancho([v["nombre_producto"] for v in ventas] + ["Producto"]), 11, 14, 10
+        10, 10, 18, _ancho([v["nombre_producto"] for v in ventas] + ["Producto"]), 11, 14, 10,
+        _ancho([v["cliente"] or "" for v in ventas] + ["Fiado a"]),
     ), columnas_centradas=(1, 2, 7))
 
-    _fila_total(hoja, fila + 1, 6, "Total recaudado (sin anuladas)", total_recaudado)
+    _fila_total(hoja, fila + 1, 6, "Total vendido (sin anuladas)", total_vendido)
+    if total_fiado:
+        _fila_total(hoja, fila + 2, 6, "De eso, fiado", total_fiado)
     return len(ventas)
 
 
@@ -176,6 +182,30 @@ def _hoja_inventario(hoja, generado, stock_bajo):
     return len(productos)
 
 
+def _hoja_fiado(hoja, generado):
+    clientes = db.obtener_clientes()
+    encabezados = ("Cliente", "Debe", "Último Movimiento")
+    fila = _preparar_hoja(hoja, f"Fiado (generado {generado})", encabezados)
+
+    total_fiado = 0.0
+    for cliente in clientes:
+        debe = cliente["debe"]
+        _escribir(hoja, fila, 1, cliente["nombre"])
+        hoja.cell(row=fila, column=2, value=debe).number_format = _formato_pesos(debe)
+        if debe > 0:
+            hoja.cell(row=fila, column=2).font = ESTILO_STOCK_BAJO
+            total_fiado += debe
+        ultimo = cliente["ultimo"]
+        celda = hoja.cell(row=fila, column=3, value=datetime.strptime(ultimo, "%Y-%m-%d %H:%M:%S") if ultimo else "—")
+        celda.number_format = FORMATO_FECHA
+        fila += 1
+
+    _terminar_hoja(hoja, fila - 1, len(encabezados), (
+        _ancho([c["nombre"] for c in clientes] + ["Cliente"]), 14, 19,
+    ), columnas_centradas=(3,))
+    _fila_total(hoja, fila + 1, 2, "Total que deben", total_fiado)
+
+
 def exportar_excel(ruta, desde=None, hasta=None, stock_bajo=5):
     """
     Crea el archivo .xlsx en 'ruta'. 'desde' y 'hasta' son fechas 'AAAA-MM-DD'
@@ -191,6 +221,7 @@ def exportar_excel(ruta, desde=None, hasta=None, stock_bajo=5):
     cantidad_ventas = _hoja_ventas(hoja_ventas, desde, hasta, generado)
     _hoja_mas_vendidos(libro.create_sheet("Más vendidos"), desde, hasta, generado)
     cantidad_productos = _hoja_inventario(libro.create_sheet("Inventario"), generado, stock_bajo)
+    _hoja_fiado(libro.create_sheet("Fiado"), generado)
 
     libro.save(ruta)
     return cantidad_ventas, cantidad_productos

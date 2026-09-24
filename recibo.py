@@ -52,12 +52,15 @@ def texto_recibo(recibo):
         if linea["anulada"]:
             devuelto += linea["total"]
 
-    lineas += [
-        separador,
-        _fila("TOTAL", formatear_precio(recibo["total"])),
-        _fila("Recibido", formatear_precio(recibo["pago"])),
-        _fila("Cambio", formatear_precio(recibo["pago"] - recibo["total"])),
-    ]
+    lineas += [separador, _fila("TOTAL", formatear_precio(recibo["total"]))]
+    if recibo["cliente"]:
+        # Venta fiada: no hubo pago ni cambio
+        lineas.append(_fila("FIADO A", recibo["cliente"]))
+    else:
+        lineas += [
+            _fila("Recibido", formatear_precio(recibo["pago"])),
+            _fila("Cambio", formatear_precio(recibo["pago"] - recibo["total"])),
+        ]
     if devuelto:
         lineas.append(_fila("Devuelto por anulación", formatear_precio(devuelto)))
     lineas += [separador, "", MENSAJE_FINAL.center(ANCHO)]

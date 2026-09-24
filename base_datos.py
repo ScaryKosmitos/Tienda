@@ -124,6 +124,34 @@ def inicializar_db():
             columnas_entradas = [fila[1] for fila in cursor.execute("PRAGMA table_info(entradas)")]
             if "motivo" not in columnas_entradas:
                 cursor.execute("ALTER TABLE entradas ADD COLUMN motivo TEXT NOT NULL DEFAULT 'Entrada'")
+
+            # Clientes a los que se les fía
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre TEXT NOT NULL
+                )
+            """)
+
+            # Cuenta de cada cliente: lo fiado suma (monto positivo) y los abonos y
+            # las ventas anuladas restan (monto negativo). Lo que debe es la suma de
+            # los movimientos no anulados. Los abonos mal registrados se anulan, no se borran
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fiado (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cliente_id INTEGER NOT NULL REFERENCES clientes (id),
+                    fecha TEXT NOT NULL,
+                    tipo TEXT NOT NULL,
+                    monto REAL NOT NULL,
+                    recibo_id INTEGER REFERENCES recibos (id),
+                    anulado INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+
+            # Las ventas fiadas guardan en el recibo a quién se le fió
+            columnas_recibos = [fila[1] for fila in cursor.execute("PRAGMA table_info(recibos)")]
+            if "cliente_id" not in columnas_recibos:
+                cursor.execute("ALTER TABLE recibos ADD COLUMN cliente_id INTEGER REFERENCES clientes (id)")
     finally:
         conexion.close()
 
@@ -416,12 +444,13 @@ def validar_pago(pago, total):
     return None
 
 
-def registrar_venta_carrito(items, pago=None):
+def registrar_venta_carrito(items, pago=None, cliente_id=None):
     """
     Registra la venta de varios productos a la vez. 'items' es una lista de
     (id_producto, cantidad). Verifica el stock de cada uno, lo descuenta y
     registra una línea por producto, todas con la misma fecha y hora y el
     mismo recibo. 'pago' es el dinero que entregó el cliente (None = pago exacto).
+    Si se da 'cliente_id', la venta completa se le fía a ese cliente (pago = 0).
     El nombre y el precio se leen de la base de datos en la misma transacción.
     Si un solo producto falla, no se registra nada: la venta es todo o nada.
     Retorna (exito: bool, mensaje: str, id_recibo: int o None).
@@ -436,8 +465,15 @@ def registrar_venta_carrito(items, pago=None):
             fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             total_venta = 0.0
 
+            if cliente_id is not None:
+                cursor.execute("SELECT 1 FROM clientes WHERE id = ?", (cliente_id,))
+                if not cursor.fetchone():
+                    raise _VentaRechazada("El cliente ya no existe.")
+
             # El total y el pago se completan al final, cuando se conoce el total
-            cursor.execute("INSERT INTO recibos (fecha, total, pago) VALUES (?, 0, 0)", (fecha_actual,))
+            cursor.execute(
+                "INSERT INTO recibos (fecha, total, pago, cliente_id) VALUES (?, 0, 0, ?)", (fecha_actual, cliente_id)
+            )
             id_recibo = cursor.lastrowid
 
             for id_producto, cantidad in items:
@@ -462,7 +498,13 @@ def registrar_venta_carrito(items, pago=None):
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (id_producto, nombre_producto, cantidad, total, fecha_actual, id_recibo))
 
-            if pago is None:
+            if cliente_id is not None:
+                pago = 0
+                cursor.execute(
+                    "INSERT INTO fiado (cliente_id, fecha, tipo, monto, recibo_id) VALUES (?, ?, 'Fiado', ?, ?)",
+                    (cliente_id, fecha_actual, total_venta, id_recibo),
+                )
+            elif pago is None:
                 pago = total_venta
             else:
                 error = validar_pago(pago, total_venta)
@@ -470,6 +512,8 @@ def registrar_venta_carrito(items, pago=None):
                     raise _VentaRechazada(error)
             cursor.execute("UPDATE recibos SET total = ?, pago = ? WHERE id = ?", (total_venta, pago, id_recibo))
 
+        if cliente_id is not None:
+            return True, f"Venta fiada. Total: {formatear_precio(total_venta)}", id_recibo
         return True, f"Venta realizada. Total: {formatear_precio(total_venta)}", id_recibo
     except _VentaRechazada as rechazo:
         return False, str(rechazo), None
@@ -479,13 +523,18 @@ def registrar_venta_carrito(items, pago=None):
 
 def obtener_recibo(id_recibo):
     """
-    Retorna un diccionario con los datos del recibo (id, fecha, total, pago) y
-    sus 'lineas' (nombre_producto, cantidad, total, anulada), o None si no existe.
+    Retorna un diccionario con los datos del recibo (id, fecha, total, pago y
+    cliente, que es el nombre del cliente si la venta fue fiada o None) y sus
+    'lineas' (nombre_producto, cantidad, total, anulada), o None si no existe.
     """
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT id, fecha, total, pago FROM recibos WHERE id = ?", (id_recibo,))
+        cursor.execute("""
+            SELECT r.id, r.fecha, r.total, r.pago, c.nombre AS cliente
+            FROM recibos r LEFT JOIN clientes c ON c.id = r.cliente_id
+            WHERE r.id = ?
+        """, (id_recibo,))
         recibo = cursor.fetchone()
         if not recibo:
             return None
@@ -498,14 +547,14 @@ def obtener_recibo(id_recibo):
         conexion.close()
 
 
-def _filtro_fechas(desde, hasta):
+def _filtro_fechas(desde, hasta, columna="fecha"):
     """Condiciones SQL y parámetros para filtrar ventas entre dos fechas 'AAAA-MM-DD' (ambas incluidas)."""
     condiciones, parametros = [], []
     if desde:
-        condiciones.append("date(fecha) >= ?")
+        condiciones.append(f"date({columna}) >= ?")
         parametros.append(desde)
     if hasta:
-        condiciones.append("date(fecha) <= ?")
+        condiciones.append(f"date({columna}) <= ?")
         parametros.append(hasta)
     return condiciones, parametros
 
@@ -513,16 +562,23 @@ def _filtro_fechas(desde, hasta):
 def obtener_ventas(desde=None, hasta=None):
     """
     Retorna las ventas ordenadas de más reciente a más antigua, con las
-    columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada
-    y recibo_id (None en las ventas hechas antes de que existieran los recibos).
+    columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada,
+    recibo_id (None en las ventas hechas antes de que existieran los recibos)
+    y cliente (nombre del cliente si la venta fue fiada, o None).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
-    condiciones, parametros = _filtro_fechas(desde, hasta)
+    condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
 
-    consulta = "SELECT id, producto_id, nombre_producto, cantidad, total, fecha, anulada, recibo_id FROM ventas"
+    consulta = """
+        SELECT v.id, v.producto_id, v.nombre_producto, v.cantidad, v.total, v.fecha, v.anulada, v.recibo_id,
+               c.nombre AS cliente
+        FROM ventas v
+        LEFT JOIN recibos r ON r.id = v.recibo_id
+        LEFT JOIN clientes c ON c.id = r.cliente_id
+    """
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
-    consulta += " ORDER BY id DESC"
+    consulta += " ORDER BY v.id DESC"
 
     conexion = conectar()
     try:
@@ -539,7 +595,7 @@ def obtener_mas_vendidos(desde=None, hasta=None):
     con las columnas nombre, unidades y total, de más a menos vendido.
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
-    condiciones, parametros = _filtro_fechas(desde, hasta)
+    condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
     condiciones.insert(0, "v.anulada = 0")
 
     # Se usa el nombre actual del producto, para que una venta hecha antes de
@@ -577,14 +633,15 @@ def anular_ventas(ids_venta):
             cursor = conexion.cursor()
             total_devuelto = 0.0
             for id_venta in ids_venta:
-                cursor.execute(
-                    "SELECT producto_id, nombre_producto, cantidad, total, anulada FROM ventas WHERE id = ?",
-                    (id_venta,)
-                )
+                cursor.execute("""
+                    SELECT v.producto_id, v.nombre_producto, v.cantidad, v.total, v.anulada, v.recibo_id, r.cliente_id
+                    FROM ventas v LEFT JOIN recibos r ON r.id = v.recibo_id
+                    WHERE v.id = ?
+                """, (id_venta,))
                 res = cursor.fetchone()
                 if not res:
                     raise _VentaRechazada(f"La venta {id_venta} no existe.")
-                producto_id, nombre_producto, cantidad, total, anulada = res
+                producto_id, nombre_producto, cantidad, total, anulada, recibo_id, cliente_id = res
                 if anulada:
                     raise _VentaRechazada(f"La venta {id_venta} ({nombre_producto}) ya estaba anulada.")
 
@@ -598,6 +655,13 @@ def anular_ventas(ids_venta):
                 cursor.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock_actual + cantidad, producto_id))
                 cursor.execute("UPDATE ventas SET anulada = 1 WHERE id = ?", (id_venta,))
                 _registrar_movimiento(cursor, producto_id, nombre_producto, cantidad, "Anulación de venta")
+                # Si la venta fue fiada, lo anulado se le descuenta de la deuda al cliente
+                if cliente_id is not None:
+                    cursor.execute(
+                        "INSERT INTO fiado (cliente_id, fecha, tipo, monto, recibo_id) VALUES (?, ?, ?, ?, ?)",
+                        (cliente_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                         f"Venta anulada ({nombre_producto})", -total, recibo_id),
+                    )
                 total_devuelto += total
 
         cantidad_lineas = len(ids_venta)
@@ -656,5 +720,168 @@ def obtener_entradas():
         cursor = conexion.cursor()
         cursor.execute("SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas ORDER BY id DESC")
         return cursor.fetchall()
+    finally:
+        conexion.close()
+
+# --- FIADO ---
+
+def _nombre_cliente_repetido(cursor, nombre, excluir_id=None):
+    """Si ya hay otro cliente con ese nombre (sin importar mayúsculas ni tildes), retorna su nombre; si no, None."""
+    cursor.execute("SELECT nombre FROM clientes WHERE id != ?", (excluir_id or -1,))
+    for (existente,) in cursor.fetchall():
+        if sin_tildes(existente) == sin_tildes(nombre):
+            return existente
+    return None
+
+def _validar_nombre_cliente(nombre):
+    if not nombre:
+        return "Escribe el nombre del cliente."
+    if len(nombre) > 60:
+        return "El nombre no puede tener más de 60 letras."
+    return None
+
+def obtener_clientes(texto=""):
+    """
+    Retorna los clientes como diccionarios con id, nombre, debe (lo que debe;
+    negativo si tiene saldo a favor) y ultimo (fecha del último movimiento o
+    None), de quien más debe a quien menos y luego por nombre. 'texto' filtra
+    por nombre sin importar tildes ni mayúsculas.
+    """
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            SELECT c.id, c.nombre, COALESCE(SUM(CASE WHEN f.anulado = 0 THEN f.monto END), 0) AS debe,
+                   MAX(f.fecha) AS ultimo
+            FROM clientes c LEFT JOIN fiado f ON f.cliente_id = c.id
+            GROUP BY c.id
+        """)
+        # Se redondea para que las sumas de decimales no dejen deudas de $0,0000001
+        clientes = [{**dict(fila), "debe": round(fila["debe"], 2)} for fila in cursor.fetchall()]
+    finally:
+        conexion.close()
+
+    if texto.strip():
+        buscado = sin_tildes(texto.strip())
+        clientes = [c for c in clientes if buscado in sin_tildes(c["nombre"])]
+    clientes.sort(key=lambda c: (-c["debe"], clave_orden(c["nombre"])))
+    return clientes
+
+def obtener_cliente(id_cliente):
+    """El cliente (como en obtener_clientes) o None si no existe."""
+    return next((c for c in obtener_clientes() if c["id"] == id_cliente), None)
+
+def agregar_cliente(nombre):
+    """Retorna (exito: bool, mensaje: str, id_cliente o None)."""
+    nombre = " ".join(nombre.split())
+    error = _validar_nombre_cliente(nombre)
+    if error:
+        return False, error, None
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            existente = _nombre_cliente_repetido(cursor, nombre)
+            if existente:
+                return False, f"Ya hay un cliente llamado '{existente}'.", None
+            cursor.execute("INSERT INTO clientes (nombre) VALUES (?)", (nombre,))
+            return True, f"Cliente '{nombre}' agregado.", cursor.lastrowid
+    finally:
+        conexion.close()
+
+def renombrar_cliente(id_cliente, nombre):
+    """Retorna (exito: bool, mensaje: str)."""
+    nombre = " ".join(nombre.split())
+    error = _validar_nombre_cliente(nombre)
+    if error:
+        return False, error
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            existente = _nombre_cliente_repetido(cursor, nombre, excluir_id=id_cliente)
+            if existente:
+                return False, f"Ya hay un cliente llamado '{existente}'."
+            cursor.execute("UPDATE clientes SET nombre = ? WHERE id = ?", (nombre, id_cliente))
+            if cursor.rowcount == 0:
+                return False, "El cliente ya no existe."
+        return True, "Nombre cambiado."
+    finally:
+        conexion.close()
+
+def eliminar_cliente(id_cliente):
+    """
+    Borra un cliente que nunca tuvo movimientos (por ejemplo, uno creado por
+    error). Los que tienen historial no se borran, para no perder la cuenta.
+    Retorna (exito: bool, mensaje: str).
+    """
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            cursor.execute("SELECT 1 FROM fiado WHERE cliente_id = ? LIMIT 1", (id_cliente,))
+            if cursor.fetchone():
+                return False, "No se puede eliminar: el cliente tiene fiados o abonos registrados."
+            cursor.execute("DELETE FROM clientes WHERE id = ?", (id_cliente,))
+        return True, "Cliente eliminado."
+    finally:
+        conexion.close()
+
+def obtener_movimientos_fiado(id_cliente):
+    """Movimientos de la cuenta del cliente (id, fecha, tipo, monto, recibo_id, anulado), del más reciente al más antiguo."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT id, fecha, tipo, monto, recibo_id, anulado FROM fiado WHERE cliente_id = ? ORDER BY id DESC",
+            (id_cliente,),
+        )
+        return cursor.fetchall()
+    finally:
+        conexion.close()
+
+def registrar_abono(id_cliente, monto):
+    """El cliente paga parte (o todo) lo que debe. Retorna (exito: bool, mensaje: str)."""
+    if not math.isfinite(monto) or monto <= 0:
+        return False, "El abono debe ser mayor a 0."
+    cliente = obtener_cliente(id_cliente)
+    if not cliente:
+        return False, "El cliente ya no existe."
+    if cliente["debe"] <= 0:
+        return False, f"{cliente['nombre']} no debe nada."
+    if round(monto, 2) > cliente["debe"]:
+        return False, f"{cliente['nombre']} solo debe {formatear_precio(cliente['debe'])}."
+
+    conexion = conectar()
+    try:
+        with conexion:
+            conexion.execute(
+                "INSERT INTO fiado (cliente_id, fecha, tipo, monto) VALUES (?, ?, 'Abono', ?)",
+                (id_cliente, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), -monto),
+            )
+    finally:
+        conexion.close()
+    queda = round(cliente["debe"] - monto, 2)
+    if queda <= 0:
+        return True, f"Abono de {formatear_precio(monto)} registrado. {cliente['nombre']} quedó al día."
+    return True, (
+        f"Abono de {formatear_precio(monto)} registrado. "
+        f"{cliente['nombre']} queda debiendo {formatear_precio(queda)}."
+    )
+
+def anular_abono(id_movimiento):
+    """Anula un abono mal registrado: la deuda vuelve a subir. Retorna (exito: bool, mensaje: str)."""
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            cursor.execute("SELECT tipo, monto, anulado FROM fiado WHERE id = ?", (id_movimiento,))
+            res = cursor.fetchone()
+            if not res or res["tipo"] != "Abono":
+                return False, "Ese movimiento no es un abono."
+            if res["anulado"]:
+                return False, "Ese abono ya estaba anulado."
+            cursor.execute("UPDATE fiado SET anulado = 1 WHERE id = ?", (id_movimiento,))
+        return True, f"Se anuló el abono de {formatear_precio(-res['monto'])}."
     finally:
         conexion.close()

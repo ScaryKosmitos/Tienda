@@ -1,13 +1,14 @@
 """
 Diálogo de cobro: se escribe (o se marca con los botones de billetes) con
-cuánto paga el cliente y muestra el cambio.
+cuánto paga el cliente y muestra el cambio. También permite fiar la venta.
 """
 import asyncio
 
 import flet as ft
 
 import base_datos as db
-from componentes import COLOR_EXITO, COLOR_PELIGRO, icono_px, px
+from componentes import COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, preguntar, px
+from dialogo_cliente import elegir_cliente
 from formato import formatear_numero, formatear_precio, leer_precio
 
 # Botones de billetes (y la moneda de $1.000): cada toque suma al monto recibido
@@ -15,12 +16,15 @@ BILLETES = [1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000]
 
 
 async def pedir_pago(page, total):
-    """Abre el diálogo de cobro y espera. Retorna el dinero recibido, o None si se cancela."""
+    """
+    Abre el diálogo de cobro y espera. Retorna (dinero_recibido, None) si se
+    cobra, (None, id_cliente) si se fía, o None si se cancela.
+    """
     resultado = asyncio.get_running_loop().create_future()
 
-    def terminar(pago):
+    def terminar(cobro):
         if not resultado.done():
-            resultado.set_result(pago)
+            resultado.set_result(cobro)
             page.pop_dialog()
 
     def leer_pago():
@@ -51,7 +55,7 @@ async def pedir_pago(page, total):
         elif error := db.validar_pago(pago, total):
             campo_pago.error_text = error
         else:
-            terminar(pago)
+            terminar((pago, None))
             return
         page.update()
 
@@ -63,6 +67,23 @@ async def pedir_pago(page, total):
         """Suma el billete a lo que ya hay: 20.000 + 5.000 = 25.000. No cobra: eso se confirma con 'Cobrar'."""
         campo_pago.value = formatear_numero((leer_pago() or 0) + billete)
         actualizar_cambio()
+
+    async def fiar(_):
+        id_cliente = await elegir_cliente(page, f"¿A quién se le fían {formatear_precio(total)}?")
+        if id_cliente is None:
+            return
+        try:
+            cliente = db.obtener_cliente(id_cliente)
+        except ERRORES_BD as error:
+            mostrar_error_bd(page, error)
+            return
+        if cliente and await preguntar(
+            page, "Fiar venta",
+            f"¿Fiar {formatear_precio(total)} a {cliente['nombre']}?\n"
+            f"Quedará debiendo {formatear_precio(cliente['debe'] + total)}.",
+            si="Fiar",
+        ):
+            terminar((None, id_cliente))
 
     def borrar(_):
         campo_pago.value = ""
@@ -104,6 +125,7 @@ async def pedir_pago(page, total):
         ),
         actions=[
             ft.TextButton("Cancelar", on_click=lambda _: terminar(None)),
+            ft.OutlinedButton("Fiar", icon=ft.Icons.MENU_BOOK_OUTLINED, on_click=fiar),
             ft.OutlinedButton("Pago exacto", on_click=pago_exacto),
             ft.FilledButton(
                 "Cobrar", icon=ft.Icons.POINT_OF_SALE,
