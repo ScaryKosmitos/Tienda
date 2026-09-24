@@ -15,6 +15,7 @@ from componentes import (
     preguntar, px,
 )
 from dialogo_clave import abrir_ajustes_clave
+from dialogo_respaldo import abrir_ajustes_respaldo
 from vista_entradas import VistaEntradas
 from vista_inventario import VistaInventario
 from vista_ventas import VistaVentas
@@ -52,6 +53,11 @@ class Aplicacion:
         # El tamaño de letra elegido la última vez
         guardada = configuracion.leer().get("escala", 1.0)
         poner_escala(guardada if any(guardada == valor for _, valor in TAMANOS) else 1.0)
+
+        # Selector de carpetas del respaldo en la nube. Se crea una sola vez (no en
+        # construir()), para no agregar uno nuevo cada vez que cambia el tamaño de letra
+        self.selector_carpeta = ft.FilePicker()
+        page.services.append(self.selector_carpeta)
 
         self.construir()
         self.ir_a(INVENTARIO)
@@ -92,6 +98,9 @@ class Aplicacion:
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         self.crear_menu_tamano(),
+                        ft.IconButton(ft.Icons.CLOUD_UPLOAD_OUTLINED, tooltip="Respaldo en la nube (Google Drive)",
+                                      on_click=lambda _: self.page.run_task(
+                                          abrir_ajustes_respaldo, self.page, self.selector_carpeta)),
                         ft.IconButton(ft.Icons.LOCK_OUTLINE, tooltip="Clave para acciones delicadas",
                                       on_click=lambda _: self.page.run_task(abrir_ajustes_clave, self.page)),
                         ft.IconButton(ft.Icons.DARK_MODE_OUTLINED, tooltip="Cambiar entre modo claro y oscuro",
@@ -219,15 +228,25 @@ def main(page: ft.Page):
 
 async def respaldar_cada_dia(page):
     """
-    Hace el respaldo del día al abrir la tienda y, si queda abierta, vuelve a
-    revisar cada hora para hacer el del día siguiente. Un fallo del respaldo no
-    debe impedir usar la tienda: solo se avisa.
+    Hace el respaldo del día al abrir la tienda y lo copia a la nube. Si queda
+    abierta, vuelve a revisar cada hora: así hace el del día siguiente y
+    reintenta la copia si Google Drive no estaba disponible. Un fallo del
+    respaldo no debe impedir usar la tienda: solo se avisa.
     """
+    # Si la nube sigue fallando igual, se avisa una sola vez y no cada hora
+    error_nube_avisado = None
     while True:
         try:
             await asyncio.to_thread(respaldar.respaldo_automatico)
         except Exception as error:
             avisar(page, f"No se pudo crear el respaldo de hoy: {error}", error=True)
+        try:
+            await asyncio.to_thread(respaldar.copiar_a_nube)
+            error_nube_avisado = None
+        except Exception as error:
+            if str(error) != error_nube_avisado:
+                avisar(page, f"No se pudo copiar el respaldo a la nube: {error}", error=True)
+                error_nube_avisado = str(error)
         await asyncio.sleep(SEGUNDOS_ENTRE_RESPALDOS)
 
 

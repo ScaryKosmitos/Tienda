@@ -50,6 +50,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 **Seguridad de los datos**
 - Respaldo automático de la base de datos una vez al día: al abrir la aplicación y, si queda abierta
   de un día para otro, también al día siguiente.
+- Respaldo en la nube: con el ícono de la **nube** de la barra lateral se elige la carpeta de Google Drive
+  y cada respaldo diario se copia allí. Así los datos no se pierden aunque el computador se dañe.
 - Precios y cantidades en formato colombiano: `$1.500`, `$1.500,50`, `1.000 unidades`.
 - Validaciones para evitar datos incorrectos (precios en 0 o mayores a $100.000.000, stock negativo
   o mayor a 1.000.000).
@@ -146,14 +148,15 @@ Tienda/
 ├── dialogo_pago.py      Diálogo de cobro con botones de billetes y el cálculo del cambio
 ├── dialogo_clave.py     Diálogos para pedir la clave y para crearla, cambiarla o quitarla
 ├── dialogo_recibo.py    Diálogo que muestra el recibo de una venta
+├── dialogo_respaldo.py  Diálogo del respaldo en la nube: elegir la carpeta de Google Drive y respaldar ahora
 ├── componentes.py       Piezas compartidas por las pantallas (tablas, tarjetas, avisos, preguntas)
 │
 ├── base_datos.py        Acceso a SQLite: productos, ventas, anulaciones, movimientos de stock y reportes
 ├── formato.py           Lectura y presentación de precios y cantidades en formato colombiano
 ├── recibo.py            Armado del recibo (texto y página para imprimir)
 ├── exportar.py          Generación del reporte de Excel
-├── respaldar.py         Copias de seguridad de la base de datos
-├── configuracion.py     Preferencias guardadas (tamaño de letra y clave) en configuracion.json
+├── respaldar.py         Copias de seguridad de la base de datos y su copia en la nube
+├── configuracion.py     Preferencias guardadas (tamaño de letra, clave y carpeta de la nube) en configuracion.json
 ├── seguridad.py         Clave cifrada para las acciones delicadas
 ├── instalar.py          Instalador: entorno de Python, librerías y accesos directos de Windows
 ├── instalar_windows.bat Doble clic para instalar en Windows (ejecuta instalar.py)
@@ -197,8 +200,24 @@ Cada recibo que se abre en el navegador queda guardado en la carpeta `recibos/`.
 
 ## Respaldos
 
-Cada día, al abrir la aplicación por primera vez, se guarda una copia de la base de datos en la
-carpeta `respaldos/`. Se conservan las 30 más recientes y las más antiguas se borran solas.
+Cada día, al abrir la aplicación por primera vez (o al cambiar de día si queda abierta), se guarda
+una copia de la base de datos en la carpeta `respaldos/`. Se conservan las 30 más recientes y las
+más antiguas se borran solas.
+
+### Respaldo en Google Drive
+
+Los respaldos de `respaldos/` están en el mismo computador: si se daña o se lo roban, se pierden
+con él. Para tener una copia en internet:
+
+1. Instalar [Google Drive para escritorio](https://www.google.com/drive/download/) e iniciar sesión.
+   Crea una unidad nueva (normalmente `G:\Mi unidad`) que se sube sola a internet.
+2. En la tienda, tocar el ícono de la **nube** de la barra lateral y luego **Usar Google Drive**
+   (o **Elegir carpeta** si no la encuentra sola).
+
+Desde entonces, cada respaldo diario se copia a `Mi unidad\Respaldos Tienda` (se conservan los 30
+más recientes). Si Google Drive está cerrado, la tienda avisa y lo vuelve a intentar cada hora. En
+la misma ventana se ve la fecha del último respaldo que llegó a la nube y está el botón
+**Respaldar ahora**. Funciona igual con OneDrive, Dropbox o una memoria USB: basta con elegir su carpeta.
 
 También se puede crear un respaldo a mano, por ejemplo en una memoria USB:
 
