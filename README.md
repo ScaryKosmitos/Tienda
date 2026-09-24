@@ -21,7 +21,8 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
   carrito) o a mano, seleccionando el producto y escribiendo la cantidad (para los que no tienen código).
 - Carrito con varios productos por venta. La venta es "todo o nada": si un producto no tiene
   stock suficiente, no se registra ninguno.
-- Cálculo del cambio al cobrar, según con cuánto paga el cliente.
+- Cálculo del cambio al cobrar, según con cuánto paga el cliente. Botones de billetes ($1.000 a
+  $100.000) que se suman al tocarlos, para no tener que escribir el monto.
 - Recibo de cada venta, con número, productos, total, dinero recibido y cambio. Se puede abrir
   en el navegador para imprimirlo o guardarlo como PDF, y volver a verlo desde el historial.
 - Anulación de ventas: las unidades vuelven al stock y la venta queda marcada como anulada (no se borra).
@@ -35,6 +36,15 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Tamaño de letra ajustable (Normal, Grande, Muy grande y Enorme) desde el botón **Tamaño de letra** (el ícono de las dos T) de la barra lateral
   o con `Ctrl +` / `Ctrl −` (`Ctrl 0` vuelve a Normal). Se recuerda al volver a abrir la aplicación.
 - Modo claro y oscuro.
+
+**Clave para acciones delicadas**
+- Con el **candado** de la barra lateral se crea una clave de 4 a 8 números. Desde entonces se pide para
+  eliminar productos, cambiar el precio o el stock de un producto y anular ventas. Vender, registrar
+  entradas y crear productos nuevos no la piden.
+- Después de escribirla bien no se vuelve a pedir durante 5 minutos (**Bloquear ahora** la pide de inmediato).
+- Se guarda cifrada en `configuracion.json`. **Si se olvida**: cerrar la tienda, abrir `configuracion.json`
+  con el Bloc de notas, borrar la parte `"clave": {...}` (o borrar el archivo entero: además de la clave,
+  solo se pierde el tamaño de letra elegido) y volver a abrir la tienda.
 
 **Seguridad de los datos**
 - Respaldo automático de la base de datos una vez al día, al abrir la aplicación.
@@ -115,7 +125,8 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 | Agrandar o achicar la letra | Pulsar el ícono de las dos **T** en la barra lateral y elegir el tamaño, o usar `Ctrl +` y `Ctrl −`. |
 | Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **Imprimir o guardar PDF** y luego Ctrl+P en el navegador. |
 | Ver un recibo anterior | En **Ventas** (barra lateral), pulsar el ícono de recibo de la venta. |
-| Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas**. |
+| Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas** (pide la clave si hay una). |
+| Crear, cambiar o quitar la clave | Pulsar el **candado** de la barra lateral. |
 | Ver ventas, ranking o exportar | Ir a **Ventas**, elegir el período (o el calendario) y usar las pestañas o **Exportar a Excel**. |
 
 La tecla **Enter** sirve como atajo para guardar el formulario, confirmar el cobro y registrar una entrada.
@@ -130,7 +141,8 @@ Tienda/
 ├── vista_inventario.py  Pantalla principal: resumen, tabla de productos, formulario y carrito
 ├── vista_ventas.py      Historial de ventas, más vendidos, anulaciones y exportación
 ├── vista_entradas.py    Entradas de mercancía y movimientos de stock
-├── dialogo_pago.py      Diálogo de cobro con el cálculo del cambio
+├── dialogo_pago.py      Diálogo de cobro con botones de billetes y el cálculo del cambio
+├── dialogo_clave.py     Diálogos para pedir la clave y para crearla, cambiarla o quitarla
 ├── dialogo_recibo.py    Diálogo que muestra el recibo de una venta
 ├── componentes.py       Piezas compartidas por las pantallas (tablas, tarjetas, avisos, preguntas)
 │
@@ -139,7 +151,8 @@ Tienda/
 ├── recibo.py            Armado del recibo (texto y página para imprimir)
 ├── exportar.py          Generación del reporte de Excel
 ├── respaldar.py         Copias de seguridad de la base de datos
-├── configuracion.py     Preferencias guardadas (tamaño de letra) en configuracion.json
+├── configuracion.py     Preferencias guardadas (tamaño de letra y clave) en configuracion.json
+├── seguridad.py         Clave cifrada para las acciones delicadas
 ├── instalar.py          Instalador: entorno de Python, librerías y accesos directos de Windows
 ├── instalar_windows.bat Doble clic para instalar en Windows (ejecuta instalar.py)
 ├── actualizar.py        Actualizador: descarga la última versión de GitHub sin tocar los datos

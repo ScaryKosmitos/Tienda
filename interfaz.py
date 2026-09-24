@@ -12,6 +12,7 @@ import respaldar
 from componentes import (
     COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, icono_px, mostrar_mensaje, poner_escala, preguntar, px,
 )
+from dialogo_clave import abrir_ajustes_clave
 from vista_entradas import VistaEntradas
 from vista_inventario import VistaInventario
 from vista_ventas import VistaVentas
@@ -86,6 +87,8 @@ class Aplicacion:
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
                         self.crear_menu_tamano(),
+                        ft.IconButton(ft.Icons.LOCK_OUTLINE, tooltip="Clave para acciones delicadas",
+                                      on_click=lambda _: self.page.run_task(abrir_ajustes_clave, self.page)),
                         ft.IconButton(ft.Icons.DARK_MODE_OUTLINED, tooltip="Cambiar entre modo claro y oscuro",
                                       on_click=self.cambiar_tema),
                     ],

@@ -13,6 +13,7 @@ from componentes import (
     encabezado, escala, etiqueta, icono_px, manejar_errores_bd, mostrar_error_bd, mostrar_mensaje, panel, preguntar, px,
     tarjeta_resumen, texto_vacio,
 )
+from dialogo_clave import pedir_clave
 from dialogo_pago import pedir_pago
 from dialogo_recibo import mostrar_recibo
 from formato import clave_orden, formatear_numero, formatear_precio, leer_entero, leer_precio
@@ -365,6 +366,13 @@ class VistaInventario:
             ):
                 return
 
+            # Cambiar el precio o el stock de un producto existente necesita la clave
+            cambia_precio_o_stock = producto and (precio != producto["precio"] or stock != producto["stock"])
+            if cambia_precio_o_stock and not await pedir_clave(
+                self.page, "Cambiar el precio o el stock de un producto necesita la clave.",
+            ):
+                return
+
             if id_producto is not None:
                 exito, mensaje = db.actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo_leido)
             else:
@@ -388,7 +396,7 @@ class VistaInventario:
             if not await preguntar(
                 self.page, "Eliminar producto", f"¿Estás seguro de eliminar '{producto['nombre']}'?",
                 si="Eliminar", peligro=True,
-            ):
+            ) or not await pedir_clave(self.page, "Eliminar un producto necesita la clave."):
                 return
             exito, mensaje = db.eliminar_producto(id_producto)
             if not exito:

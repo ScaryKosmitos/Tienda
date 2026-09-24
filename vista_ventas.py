@@ -13,6 +13,7 @@ from componentes import (
     COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla, encabezado,
     etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, texto_vacio,
 )
+from dialogo_clave import pedir_clave
 from dialogo_recibo import mostrar_recibo
 from formato import describir_periodo, formatear_numero, formatear_precio
 from recibo import numero_recibo
@@ -307,7 +308,7 @@ class VistaVentas:
             self.page, "Anular ventas",
             f"¿Anular {len(self.seleccion)} línea(s) de venta? Las unidades volverán al stock.",
             si="Anular", peligro=True,
-        ):
+        ) or not await pedir_clave(self.page, "Anular ventas necesita la clave."):
             return
 
         exito, mensaje = db.anular_ventas(sorted(self.seleccion))
