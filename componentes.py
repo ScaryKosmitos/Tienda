@@ -246,11 +246,16 @@ def con_desplazamiento(tabla):
 
 
 def texto_vacio(icono, mensaje):
-    """Ícono grande y texto gris para cuando una lista o tabla no tiene nada."""
+    """
+    Ícono grande y texto gris para cuando una lista o tabla no tiene nada. Va
+    dentro de un ft.Stack, encima de la lista: left/top/right/bottom en 0 le
+    hacen ocupar todo el recuadro, para quedar centrado (si no, queda del
+    tamaño del texto y pegado a la izquierda).
+    """
     return ft.Column(
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         alignment=ft.MainAxisAlignment.CENTER,
-        expand=True,
+        left=0, top=0, right=0, bottom=0,
         controls=[
             ft.Icon(icono, size=px(48), color=ft.Colors.OUTLINE),
             ft.Text(mensaje, color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER),
