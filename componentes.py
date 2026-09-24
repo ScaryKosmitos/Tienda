@@ -1,9 +1,13 @@
 """
-Piezas de interfaz que comparten la ventana principal y las ventanas secundarias.
+Piezas de interfaz que comparten todas las pantallas: colores, avisos,
+preguntas de confirmación y el manejo de errores de la base de datos.
 """
+import asyncio
+import inspect
 import sqlite3
 from functools import wraps
-from tkinter import messagebox, ttk
+
+import flet as ft
 
 # Los productos con menos unidades que esto se marcan en rojo
 STOCK_BAJO = 5
@@ -11,47 +15,174 @@ STOCK_BAJO = 5
 # Errores que se muestran como "Error de Base de Datos" (archivo bloqueado, permisos, etc.)
 ERRORES_BD = (sqlite3.Error, OSError)
 
+COLOR_MARCA = ft.Colors.INDIGO
+COLOR_EXITO = ft.Colors.GREEN_700
+COLOR_PELIGRO = ft.Colors.RED
 
-def mostrar_error_bd(error, parent=None):
+
+# --- AVISOS Y PREGUNTAS ---
+
+def avisar(page, mensaje, error=False):
+    """Aviso corto en la parte de abajo que se quita solo."""
+    page.show_dialog(ft.SnackBar(
+        ft.Text(mensaje, color=ft.Colors.WHITE if error else None),
+        bgcolor=ft.Colors.RED_700 if error else None,
+        behavior=ft.SnackBarBehavior.FLOATING,
+        width=520,
+    ))
+
+
+def mostrar_mensaje(page, titulo, mensaje, error=False):
+    """Mensaje que se cierra con un botón, para cosas que el usuario debe leer."""
+    page.show_dialog(ft.AlertDialog(
+        icon=ft.Icon(
+            ft.Icons.ERROR_OUTLINE if error else ft.Icons.INFO_OUTLINE,
+            color=COLOR_PELIGRO if error else COLOR_MARCA,
+        ),
+        title=ft.Text(titulo),
+        content=ft.Text(mensaje, width=420),
+        actions=[ft.FilledButton("Entendido", on_click=lambda _: page.pop_dialog())],
+    ))
+
+
+async def preguntar(page, titulo, mensaje, si="Sí", no="Cancelar", peligro=False):
+    """Pregunta de sí o no. Espera la respuesta y retorna True o False."""
+    respuesta = asyncio.get_running_loop().create_future()
+
+    def responder(valor):
+        if not respuesta.done():
+            respuesta.set_result(valor)
+            page.pop_dialog()
+
+    estilo = ft.ButtonStyle(bgcolor=COLOR_PELIGRO, color=ft.Colors.WHITE) if peligro else None
+    page.show_dialog(ft.AlertDialog(
+        modal=True,
+        title=ft.Text(titulo),
+        content=ft.Text(mensaje, width=420),
+        actions=[
+            ft.TextButton(no, on_click=lambda _: responder(False)),
+            ft.FilledButton(si, style=estilo, on_click=lambda _: responder(True)),
+        ],
+        on_dismiss=lambda _: respuesta.done() or respuesta.set_result(False),
+    ))
+    return await respuesta
+
+
+def mostrar_error_bd(page, error):
     """Aviso claro cuando falla el acceso a la base de datos."""
-    messagebox.showerror(
-        "Error de Base de Datos",
-        f"Ocurrió un problema al acceder a la base de datos:\n{error}",
-        parent=parent
+    mostrar_mensaje(
+        page, "Error de Base de Datos", f"Ocurrió un problema al acceder a la base de datos:\n{error}", error=True
     )
 
 
 def manejar_errores_bd(func):
-    """Evita que un error inesperado de la base de datos cierre la aplicación
-    sin explicación: muestra un aviso claro en su lugar."""
+    """Evita que un error inesperado de la base de datos deje la pantalla a
+    medias sin explicación: muestra un aviso claro en su lugar. Sirve para
+    métodos normales y para métodos async de las vistas (que tienen self.page)."""
+    if inspect.iscoroutinefunction(func):
+        @wraps(func)
+        async def envoltorio_async(self, *args, **kwargs):
+            try:
+                return await func(self, *args, **kwargs)
+            except ERRORES_BD as error:
+                mostrar_error_bd(self.page, error)
+        return envoltorio_async
+
     @wraps(func)
     def envoltorio(self, *args, **kwargs):
         try:
             return func(self, *args, **kwargs)
         except ERRORES_BD as error:
-            mostrar_error_bd(error, parent=self)
+            mostrar_error_bd(self.page, error)
     return envoltorio
 
 
-def crear_tabla(padre, columnas, **opciones):
+# --- PIEZAS VISUALES ---
+
+def panel(contenido, **opciones):
+    """Recuadro redondeado con el fondo de las tarjetas."""
+    return ft.Container(
+        content=contenido, padding=opciones.pop("padding", 20), border_radius=16,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW, **opciones,
+    )
+
+
+def encabezado(titulo, subtitulo, *acciones):
+    """Título grande de cada pantalla, con botones opcionales a la derecha."""
+    return ft.Row(
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        controls=[
+            ft.Column(
+                spacing=0,
+                controls=[
+                    ft.Text(titulo, size=28, weight=ft.FontWeight.BOLD),
+                    ft.Text(subtitulo, color=ft.Colors.ON_SURFACE_VARIANT),
+                ],
+            ),
+            ft.Row(list(acciones), spacing=8),
+        ],
+    )
+
+
+def tarjeta_resumen(icono, titulo, color):
+    """Tarjeta con un ícono y un número. Retorna (tarjeta, texto_del_valor) para poder actualizarla."""
+    valor = ft.Text("—", size=22, weight=ft.FontWeight.BOLD)
+    tarjeta = panel(
+        ft.Row(
+            spacing=14,
+            controls=[
+                ft.Container(
+                    content=ft.Icon(icono, color=color, size=24),
+                    bgcolor=ft.Colors.with_opacity(0.12, color), border_radius=12, padding=10,
+                ),
+                ft.Column([ft.Text(titulo, size=13, color=ft.Colors.ON_SURFACE_VARIANT), valor], spacing=0),
+            ],
+        ),
+        padding=16, expand=True,
+    )
+    return tarjeta, valor
+
+
+def etiqueta(texto, color):
+    """Pastilla de color suave con texto (ej: el stock o el estado de una venta)."""
+    return ft.Container(
+        content=ft.Text(texto, size=13, weight=ft.FontWeight.W_600, color=color),
+        bgcolor=ft.Colors.with_opacity(0.12, color),
+        border_radius=20,
+        padding=ft.Padding.symmetric(horizontal=12, vertical=4),
+    )
+
+
+def crear_tabla(columnas, **opciones):
     """
-    Crea una tabla (Treeview) con barra de desplazamiento dentro de 'padre'.
-    'columnas' es una lista de (clave, título, opciones_de_columna), por ejemplo:
-        ("total", "Total ($)", {"width": 90, "anchor": "e"})
-    Retorna la tabla.
+    Tabla con el estilo de la aplicación. 'columnas' es una lista de
+    (título, es_numerica). Las filas se asignan después en tabla.rows.
     """
-    tabla = ttk.Treeview(padre, columns=[clave for clave, _, _ in columnas], show="headings", **opciones)
-    for clave, titulo, opciones_columna in columnas:
-        tabla.heading(clave, text=titulo)
-        tabla.column(clave, **opciones_columna)
+    return ft.DataTable(
+        heading_row_height=44,
+        data_row_min_height=46,
+        data_row_max_height=46,
+        column_spacing=24,
+        horizontal_lines=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
+        heading_text_style=ft.TextStyle(weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE_VARIANT, size=13),
+        columns=[ft.DataColumn(ft.Text(titulo), numeric=numerica) for titulo, numerica in columnas],
+        **opciones,
+    )
 
-    scrollbar = ttk.Scrollbar(padre, orient="vertical", command=tabla.yview)
-    tabla.configure(yscroll=scrollbar.set)
-    tabla.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-    return tabla
+
+def con_desplazamiento(tabla):
+    """Envuelve una tabla para que se pueda desplazar si tiene muchas filas."""
+    return ft.Column([ft.Row([tabla], scroll=ft.ScrollMode.AUTO)], scroll=ft.ScrollMode.AUTO, expand=True)
 
 
-def vaciar_tabla(tabla):
-    """Quita todas las filas de una tabla."""
-    tabla.delete(*tabla.get_children())
+def texto_vacio(icono, mensaje):
+    """Ícono grande y texto gris para cuando una lista o tabla no tiene nada."""
+    return ft.Column(
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        alignment=ft.MainAxisAlignment.CENTER,
+        expand=True,
+        controls=[
+            ft.Icon(icono, size=48, color=ft.Colors.OUTLINE),
+            ft.Text(mensaje, color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER),
+        ],
+    )

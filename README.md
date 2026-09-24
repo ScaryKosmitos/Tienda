@@ -2,7 +2,7 @@
 
 Aplicación de escritorio para administrar una tienda pequeña: registrar productos,
 vender con carrito, controlar el stock y consultar reportes de ventas.
-Está hecha en Python con una interfaz gráfica en [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)
+Está hecha en Python con una interfaz gráfica en [Flet](https://flet.dev) (basada en Flutter, con modo claro y oscuro)
 y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad de instalar un servidor).
 
 ## Funciones
@@ -39,17 +39,15 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 
 ## Requisitos
 
-- Python 3 con Tkinter (desarrollado y probado con Python 3.14 y Tk 8.6).
+- Python 3 (desarrollado y probado con Python 3.14).
 - Las librerías de `requirements.txt`:
-  - `customtkinter`: la interfaz gráfica.
+  - `flet`: la interfaz gráfica. La primera vez que se abre la aplicación descarga su visor de escritorio.
+    En Linux, el diálogo para guardar el reporte de Excel usa `zenity` (viene con GNOME).
   - `openpyxl`: la exportación a Excel. Es opcional; sin ella la aplicación funciona igual,
     solo que el botón de exportar avisa que falta.
 
 Para vender escaneando sirve cualquier lector de códigos de barras USB que funcione como teclado
 (los "plug and play" o "USB HID"): no necesita drivers. Sin lector, el código se puede escribir a mano.
-
-En Windows, Tkinter viene incluido con el instalador de Python. En Linux a veces hay que
-instalarlo aparte (por ejemplo, el paquete `tk` en Arch/CachyOS o `python3-tk` en Ubuntu/Debian).
 
 ## Instalación
 
@@ -82,17 +80,18 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 
 | Para... | Hacer... |
 |---|---|
-| Agregar un producto | Llenar el formulario de la izquierda y pulsar **Guardar Producto**. |
-| Editar un producto | Hacer clic en él en la tabla, cambiar los datos y pulsar **Actualizar Producto**. |
-| Vender escaneando | Con el cursor en **📷 Escanear código de barras** (junto al carrito), escanear cada producto y luego pulsar **💵 Cobrar Venta**. |
-| Vender a mano | Seleccionar el producto, escribir la cantidad, pulsar **Agregar al Carrito** y luego **💵 Cobrar Venta**. |
-| Asignar un código de barras | Seleccionar el producto, escanear en el campo **Código de barras** del formulario y pulsar **Actualizar Producto**. Si se escanea al vender un código que no existe, el programa ofrece registrar el producto. |
-| Registrar mercancía que llegó | Seleccionar el producto y pulsar **📥 Entrada de Mercancía**. |
-| Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **🖨 Abrir para imprimir o guardar** y luego Ctrl+P en el navegador. |
-| Ver un recibo anterior | En **📋 Historial de Ventas**, seleccionar la venta y pulsar **🧾 Ver Recibo**. |
-| Ver ventas, ranking o exportar | Pulsar **📋 Historial de Ventas**, elegir el período y usar las pestañas o **📊 Exportar a Excel**. |
+| Agregar un producto | Pulsar **Nuevo producto**, llenar el formulario y pulsar **Guardar**. |
+| Editar o eliminar un producto | Hacer clic en su fila de la tabla (o en el lápiz), cambiar los datos y pulsar **Guardar**, o **Eliminar**. |
+| Vender escaneando | Con el cursor en **Escanear código de barras** (arriba del carrito), escanear cada producto y luego pulsar **Cobrar venta**. |
+| Vender a mano | Pulsar el carrito de la fila del producto y ajustar la cantidad con **−** / **+** o escribiéndola en el carrito; luego **Cobrar venta**. |
+| Asignar un código de barras | Abrir el producto, escanear en el campo **Código de barras** y pulsar **Guardar**. Si se escanea al vender un código que no existe, el programa ofrece registrar el producto. |
+| Registrar mercancía que llegó | Pulsar la bandeja de la fila del producto, o ir a **Entradas** en la barra lateral y elegirlo. |
+| Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **Imprimir o guardar PDF** y luego Ctrl+P en el navegador. |
+| Ver un recibo anterior | En **Ventas** (barra lateral), pulsar el ícono de recibo de la venta. |
+| Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas**. |
+| Ver ventas, ranking o exportar | Ir a **Ventas**, elegir el período (o el calendario) y usar las pestañas o **Exportar a Excel**. |
 
-La tecla **Enter** sirve como atajo para guardar el formulario, agregar al carrito y confirmar el cobro.
+La tecla **Enter** sirve como atajo para guardar el formulario, confirmar el cobro y registrar una entrada.
 
 ## Estructura del proyecto
 
@@ -100,12 +99,13 @@ La tecla **Enter** sirve como atajo para guardar el formulario, agregar al carri
 Tienda/
 ├── main.py              Punto de entrada: prepara la base de datos, hace el respaldo del día y abre la ventana
 │
-├── interfaz.py          Ventana principal: formulario, tabla de productos y carrito
-├── ventana_pago.py      Ventana de cobro con el cálculo del cambio
-├── ventana_recibo.py    Ventana que muestra el recibo de una venta
-├── ventana_ventas.py    Historial de ventas, más vendidos, anulaciones y exportación
-├── ventana_entradas.py  Entradas de mercancía y movimientos de stock
-├── componentes.py       Piezas compartidas por las ventanas (tablas, avisos de error)
+├── interfaz.py          Ventana principal: barra lateral, cambio de pantalla y cierre
+├── vista_inventario.py  Pantalla principal: resumen, tabla de productos, formulario y carrito
+├── vista_ventas.py      Historial de ventas, más vendidos, anulaciones y exportación
+├── vista_entradas.py    Entradas de mercancía y movimientos de stock
+├── dialogo_pago.py      Diálogo de cobro con el cálculo del cambio
+├── dialogo_recibo.py    Diálogo que muestra el recibo de una venta
+├── componentes.py       Piezas compartidas por las pantallas (tablas, tarjetas, avisos, preguntas)
 │
 ├── base_datos.py        Acceso a SQLite: productos, ventas, anulaciones, movimientos de stock y reportes
 ├── formato.py           Lectura y presentación de precios y cantidades en formato colombiano
@@ -117,7 +117,7 @@ Tienda/
 
 El código está separado en dos capas:
 
-- **Interfaz** (`interfaz.py` y los archivos `ventana_*.py`): lo que se ve en pantalla.
+- **Interfaz** (`interfaz.py`, `componentes.py` y los archivos `vista_*.py` y `dialogo_*.py`): lo que se ve en pantalla.
 - **Datos** (`base_datos.py`, `formato.py`, `recibo.py`, `exportar.py` y `respaldar.py`): guardar, leer y presentar la información.
 
 Las dependencias van en un solo sentido: la interfaz usa la capa de datos, nunca al revés.
