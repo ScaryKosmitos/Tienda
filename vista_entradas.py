@@ -11,6 +11,9 @@ from componentes import (
 )
 from formato import clave_orden, formatear_cambio, formatear_numero, leer_entero
 
+# La tabla muestra como máximo estos movimientos (los más recientes), para que siga ágil
+MAX_FILAS = 300
+
 
 class VistaEntradas:
     def __init__(self, page):
@@ -34,6 +37,7 @@ class VistaEntradas:
             [("Producto", False), ("Unidades", True), ("Fecha y hora", False), ("Motivo", False)],
         )
         self.sin_movimientos = texto_vacio(ft.Icons.MOVE_TO_INBOX_OUTLINED, "Todavía no hay movimientos de stock")
+        self.aviso_limite = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
 
         self.control = ft.Column(
             spacing=20,
@@ -58,6 +62,7 @@ class VistaEntradas:
                             ft.Text("Movimientos de stock (entradas, stock inicial, ajustes manuales y anulaciones)",
                                     size=px(18), weight=ft.FontWeight.BOLD),
                             ft.Stack([con_desplazamiento(self.tabla), self.sin_movimientos], expand=True),
+                            self.aviso_limite,
                         ],
                     ),
                     expand=True,
@@ -96,7 +101,12 @@ class VistaEntradas:
             self.texto_stock.value = "Elige el producto que llegó"
 
     def cargar_movimientos(self):
-        movimientos = db.obtener_entradas()
+        movimientos = db.obtener_entradas(limite=MAX_FILAS)
+        total = db.contar_entradas() if len(movimientos) == MAX_FILAS else len(movimientos)
+        self.aviso_limite.visible = total > len(movimientos)
+        self.aviso_limite.value = (
+            f"Se muestran los {formatear_numero(len(movimientos))} movimientos más recientes de {formatear_numero(total)}."
+        )
         self.tabla.rows = [
             ft.DataRow(cells=[
                 ft.DataCell(ft.Text(nombre, weight=ft.FontWeight.W_500)),

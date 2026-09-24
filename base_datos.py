@@ -168,6 +168,13 @@ def inicializar_db():
                 cursor.execute("ALTER TABLE fiado ADD COLUMN medio TEXT")
                 cursor.execute("UPDATE fiado SET medio = 'Efectivo' WHERE tipo = 'Abono'")
 
+            # Índices: permiten buscar por fecha, recibo o cliente sin recorrer la
+            # tabla entera, para que la tienda siga ágil con años de ventas
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ventas_recibo ON ventas (recibo_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fiado_cliente ON fiado (cliente_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fiado_fecha ON fiado (fecha)")
+
             # Base: el efectivo con el que empieza la caja cada día
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS caja_base (
@@ -187,6 +194,7 @@ def inicializar_db():
                     anulada INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_salidas_fecha ON salidas (fecha)")
     finally:
         conexion.close()
 
@@ -591,18 +599,22 @@ def obtener_recibo(id_recibo):
 
 
 def _filtro_fechas(desde, hasta, columna="fecha"):
-    """Condiciones SQL y parámetros para filtrar ventas entre dos fechas 'AAAA-MM-DD' (ambas incluidas)."""
+    """
+    Condiciones SQL y parámetros para filtrar entre dos fechas 'AAAA-MM-DD'
+    (ambas incluidas). Compara el texto de la fecha y hora completa (en vez de
+    usar date(...)), para que SQLite pueda usar el índice de la columna.
+    """
     condiciones, parametros = [], []
     if desde:
-        condiciones.append(f"date({columna}) >= ?")
-        parametros.append(desde)
+        condiciones.append(f"{columna} >= ?")
+        parametros.append(f"{desde} 00:00:00")
     if hasta:
-        condiciones.append(f"date({columna}) <= ?")
-        parametros.append(hasta)
+        condiciones.append(f"{columna} <= ?")
+        parametros.append(f"{hasta} 23:59:59")
     return condiciones, parametros
 
 
-def obtener_ventas(desde=None, hasta=None):
+def obtener_ventas(desde=None, hasta=None, limite=None):
     """
     Retorna las ventas ordenadas de más reciente a más antigua, con las
     columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada,
@@ -610,6 +622,7 @@ def obtener_ventas(desde=None, hasta=None):
     cliente (nombre del cliente si la venta fue fiada, o None) y medio
     (EFECTIVO o NEQUI; None si fue fiada).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
+    'limite' retorna solo las más recientes (None = todas).
     """
     condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
 
@@ -624,12 +637,43 @@ def obtener_ventas(desde=None, hasta=None):
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY v.id DESC"
+    if limite is not None:
+        consulta += " LIMIT ?"
+        parametros.append(limite)
 
     conexion = conectar()
     try:
         cursor = conexion.cursor()
         cursor.execute(consulta, parametros)
         return cursor.fetchall()
+    finally:
+        conexion.close()
+
+
+def resumen_ventas(desde=None, hasta=None):
+    """
+    Totales de las ventas del período (sin contar las anuladas): total, nequi,
+    fiado y lineas (cantidad de líneas de venta). Además 'todas', la cantidad
+    de líneas incluyendo las anuladas. Los calcula SQLite sin traer cada venta.
+    """
+    condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
+    consulta = """
+        SELECT COALESCE(SUM(CASE WHEN v.anulada = 0 THEN v.total END), 0) AS total,
+               COALESCE(SUM(CASE WHEN v.anulada = 0 AND r.cliente_id IS NULL AND r.medio = 'Nequi'
+                                 THEN v.total END), 0) AS nequi,
+               COALESCE(SUM(CASE WHEN v.anulada = 0 AND r.cliente_id IS NOT NULL THEN v.total END), 0) AS fiado,
+               COUNT(CASE WHEN v.anulada = 0 THEN 1 END) AS lineas,
+               COUNT(*) AS todas
+        FROM ventas v LEFT JOIN recibos r ON r.id = v.recibo_id
+    """
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(consulta, parametros)
+        return dict(cursor.fetchone())
     finally:
         conexion.close()
 
@@ -754,16 +798,29 @@ def registrar_entrada(id_producto, cantidad):
     finally:
         conexion.close()
 
-def obtener_entradas():
+def contar_entradas():
+    """Cantidad total de movimientos de stock."""
+    conexion = conectar()
+    try:
+        return conexion.execute("SELECT COUNT(*) FROM entradas").fetchone()[0]
+    finally:
+        conexion.close()
+
+def obtener_entradas(limite=None):
     """
     Retorna los movimientos de stock (entradas, stock inicial, ajustes
     manuales y anulaciones de ventas) como (id, nombre_producto, cantidad, fecha, motivo), del más
-    reciente al más antiguo.
+    reciente al más antiguo. 'limite' retorna solo los más recientes (None = todos).
     """
+    consulta = "SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas ORDER BY id DESC"
+    parametros = []
+    if limite is not None:
+        consulta += " LIMIT ?"
+        parametros.append(limite)
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute("SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas ORDER BY id DESC")
+        cursor.execute(consulta, parametros)
         return cursor.fetchall()
     finally:
         conexion.close()
@@ -872,18 +929,21 @@ def eliminar_cliente(id_cliente):
     finally:
         conexion.close()
 
-def obtener_movimientos_fiado(id_cliente):
+def obtener_movimientos_fiado(id_cliente, limite=None):
     """
     Movimientos de la cuenta del cliente (id, fecha, tipo, monto, recibo_id,
     anulado y medio, que solo tienen los abonos), del más reciente al más antiguo.
+    'limite' retorna solo los más recientes (None = todos).
     """
+    consulta = "SELECT id, fecha, tipo, monto, recibo_id, anulado, medio FROM fiado WHERE cliente_id = ? ORDER BY id DESC"
+    parametros = [id_cliente]
+    if limite is not None:
+        consulta += " LIMIT ?"
+        parametros.append(limite)
     conexion = conectar()
     try:
         cursor = conexion.cursor()
-        cursor.execute(
-            "SELECT id, fecha, tipo, monto, recibo_id, anulado, medio FROM fiado WHERE cliente_id = ? ORDER BY id DESC",
-            (id_cliente,),
-        )
+        cursor.execute(consulta, parametros)
         return cursor.fetchall()
     finally:
         conexion.close()
@@ -937,6 +997,10 @@ def anular_abono(id_movimiento):
         conexion.close()
 
 # --- CAJA ---
+
+def _rango_dia(fecha):
+    """('2026-09-24 00:00:00', '2026-09-24 23:59:59'): para buscar un día usando el índice de la fecha."""
+    return f"{fecha} 00:00:00", f"{fecha} 23:59:59"
 
 def validar_monto_caja(monto):
     """Retorna un mensaje de error si el monto de una base o una salida no es válido, o None."""
@@ -1003,7 +1067,8 @@ def obtener_salidas(fecha):
     try:
         cursor = conexion.cursor()
         cursor.execute(
-            "SELECT id, fecha, monto, motivo, anulada FROM salidas WHERE date(fecha) = ? ORDER BY id DESC", (fecha,)
+            "SELECT id, fecha, monto, motivo, anulada FROM salidas WHERE fecha BETWEEN ? AND ? ORDER BY id DESC",
+            _rango_dia(fecha),
         )
         return cursor.fetchall()
     finally:
@@ -1045,17 +1110,18 @@ def resumen_caja(fecha):
                    COALESCE(SUM(CASE WHEN r.cliente_id IS NOT NULL THEN v.total END), 0) AS fiado,
                    COALESCE(SUM(v.total), 0) AS total
             FROM ventas v LEFT JOIN recibos r ON r.id = v.recibo_id
-            WHERE v.anulada = 0 AND date(v.fecha) = ?
-        """, (fecha,))
+            WHERE v.anulada = 0 AND v.fecha BETWEEN ? AND ?
+        """, _rango_dia(fecha))
         ventas = cursor.fetchone()
         cursor.execute("""
             SELECT COALESCE(SUM(CASE WHEN COALESCE(medio, 'Efectivo') = 'Efectivo' THEN -monto END), 0) AS efectivo,
                    COALESCE(SUM(CASE WHEN medio = 'Nequi' THEN -monto END), 0) AS nequi
-            FROM fiado WHERE tipo = 'Abono' AND anulado = 0 AND date(fecha) = ?
-        """, (fecha,))
+            FROM fiado WHERE tipo = 'Abono' AND anulado = 0 AND fecha BETWEEN ? AND ?
+        """, _rango_dia(fecha))
         abonos = cursor.fetchone()
         cursor.execute(
-            "SELECT COALESCE(SUM(monto), 0) FROM salidas WHERE anulada = 0 AND date(fecha) = ?", (fecha,)
+            "SELECT COALESCE(SUM(monto), 0) FROM salidas WHERE anulada = 0 AND fecha BETWEEN ? AND ?",
+            _rango_dia(fecha),
         )
         salidas = cursor.fetchone()[0]
         cursor.execute("SELECT monto FROM caja_base WHERE fecha = ?", (fecha,))

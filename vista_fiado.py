@@ -14,6 +14,10 @@ from dialogo_cliente import pedir_abono, pedir_texto, texto_deuda
 from dialogo_recibo import mostrar_recibo
 from formato import formatear_numero, formatear_precio
 
+# Movimientos que se muestran de cada cliente (los más recientes), para que la
+# lista siga ágil con clientes de muchos años
+MAX_MOVIMIENTOS = 100
+
 
 class VistaFiado:
     def __init__(self, page):
@@ -165,8 +169,16 @@ class VistaFiado:
         self.texto_deuda.value, self.texto_deuda.color = texto_deuda(cliente["debe"])
         self.boton_abono.disabled = cliente["debe"] <= 0
 
-        movimientos = db.obtener_movimientos_fiado(self.id_cliente)
+        # Se pide uno de más para saber si hay más de los que se muestran
+        movimientos = db.obtener_movimientos_fiado(self.id_cliente, limite=MAX_MOVIMIENTOS + 1)
+        hay_mas = len(movimientos) > MAX_MOVIMIENTOS
+        movimientos = movimientos[:MAX_MOVIMIENTOS]
         self.lista_movimientos.controls = [self.linea_movimiento(m) for m in movimientos]
+        if hay_mas:
+            self.lista_movimientos.controls.append(ft.Text(
+                f"Se muestran los {MAX_MOVIMIENTOS} movimientos más recientes.",
+                size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER,
+            ))
         self.sin_movimientos.visible = not movimientos
         # Solo se puede eliminar un cliente sin movimientos (ej: creado por error)
         self.boton_eliminar.visible = not movimientos

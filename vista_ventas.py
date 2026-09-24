@@ -3,6 +3,7 @@ Pantalla del historial de ventas, con dos pestañas que comparten los filtros
 de fecha: el historial (donde se ven los recibos y se anulan ventas) y el
 ranking de productos más vendidos. También exporta el período a Excel.
 """
+import asyncio
 import os
 from datetime import date, datetime, timedelta
 
@@ -18,6 +19,11 @@ from dialogo_recibo import mostrar_recibo
 from formato import describir_periodo, formatear_numero, formatear_precio
 from recibo import numero_recibo
 
+# La tabla muestra como máximo estas líneas (las más recientes). Con miles de
+# filas la ventana se pone lenta y puede colgarse; los totales sí cuentan
+# todas las ventas del período, y el Excel las exporta todas
+MAX_FILAS = 300
+
 
 class VistaVentas:
     def __init__(self, page):
@@ -27,6 +33,8 @@ class VistaVentas:
         self.hasta = None
         # Líneas de venta marcadas para anular
         self.seleccion = set()
+        # La primera vez que se entra se muestran las ventas de hoy
+        self.primera_vez = True
 
         self.selector_archivo = ft.FilePicker()
         page.services.append(self.selector_archivo)
@@ -136,10 +144,12 @@ class VistaVentas:
         )
         self.sin_ventas = texto_vacio(ft.Icons.RECEIPT_LONG_OUTLINED, "No hay ventas en este período")
         self.texto_total = ft.Text("", size=px(17), weight=ft.FontWeight.BOLD, color=COLOR_EXITO)
+        self.aviso_limite = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
         return ft.Column(
             expand=True,
             controls=[
                 ft.Stack([con_desplazamiento(self.tabla_ventas), self.sin_ventas], expand=True),
+                self.aviso_limite,
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     controls=[self.texto_total, self.boton_anular],
@@ -163,8 +173,12 @@ class VistaVentas:
     # --- FILTROS Y CARGA DE DATOS ---
 
     def mostrar(self):
-        """Se llama cada vez que se entra a esta pantalla."""
-        self.cargar()
+        """Se llama cada vez que se entra a esta pantalla. La primera vez muestra las ventas de hoy."""
+        if self.primera_vez:
+            self.primera_vez = False
+            self.poner_periodo(lambda hoy: hoy)
+        else:
+            self.cargar()
 
     def poner_periodo(self, inicio):
         """'inicio(hoy)' da la primera fecha del período, que termina hoy; None = todo el historial."""
@@ -217,31 +231,34 @@ class VistaVentas:
         if fechas is None:
             return
         desde, hasta = fechas
-        ventas = db.obtener_ventas(desde, hasta)
+        ventas = db.obtener_ventas(desde, hasta, limite=MAX_FILAS)
+        resumen = db.resumen_ventas(desde, hasta)
         ranking = db.obtener_mas_vendidos(desde, hasta)
 
         self.desde, self.hasta = desde, hasta
         periodo = describir_periodo(desde, hasta)
         self.seleccion.clear()
-        self.mostrar_ventas(ventas, periodo)
+        self.mostrar_ventas(ventas, resumen, periodo)
         self.mostrar_ranking(ranking, periodo)
         self.page.update()
 
-    def mostrar_ventas(self, ventas, periodo):
-        validas = [v for v in ventas if not v["anulada"]]
-        dinero_total = sum(v["total"] for v in validas)
+    def mostrar_ventas(self, ventas, resumen, periodo):
+        """'ventas' son las líneas a mostrar (las más recientes) y 'resumen' los totales de todo el período."""
         self.tabla_ventas.rows = [self.fila_venta(v) for v in ventas]
         self.sin_ventas.visible = not ventas
+        self.aviso_limite.visible = resumen["todas"] > len(ventas)
+        self.aviso_limite.value = (
+            f"Se muestran las {formatear_numero(len(ventas))} líneas más recientes de "
+            f"{formatear_numero(resumen['todas'])}. Elige menos días para ver las demás "
+            "(los totales y el Excel sí incluyen todas)."
+        )
         # Cuánto de lo vendido fue por Nequi o fiado (lo demás, en efectivo)
-        partes = []
-        for nombre, total in (("Nequi", sum(v["total"] for v in validas if v["medio"] == db.NEQUI)),
-                              ("fiado", sum(v["total"] for v in validas if v["cliente"]))):
-            if total:
-                partes.append(f"{nombre}: {formatear_precio(total)}")
-        self.texto_total.value = f"Total vendido ({periodo}): {formatear_precio(dinero_total)}"
+        partes = [f"{nombre}: {formatear_precio(resumen[clave])}"
+                  for nombre, clave in (("Nequi", "nequi"), ("fiado", "fiado")) if resumen[clave]]
+        self.texto_total.value = f"Total vendido ({periodo}): {formatear_precio(resumen['total'])}"
         if partes:
             self.texto_total.value += f" (de eso {', '.join(partes)})"
-        self.texto_total.value += f"  ·  {len(validas)} líneas de venta"
+        self.texto_total.value += f"  ·  {formatear_numero(resumen['lineas'])} líneas de venta"
         self.actualizar_boton_anular()
 
     def fila_venta(self, venta):
@@ -378,8 +395,12 @@ class VistaVentas:
         if not ruta.lower().endswith(".xlsx"):
             ruta += ".xlsx"
 
+        # Con mucho historial tarda unos segundos: se hace aparte para que la ventana no se congele
+        avisar(self.page, "Generando el reporte de Excel…")
         try:
-            cantidad_ventas, cantidad_productos = exportar.exportar_excel(ruta, desde, hasta, STOCK_BAJO)
+            cantidad_ventas, cantidad_productos = await asyncio.to_thread(
+                exportar.exportar_excel, ruta, desde, hasta, STOCK_BAJO,
+            )
         except PermissionError:
             mostrar_mensaje(
                 self.page, "No se pudo guardar",

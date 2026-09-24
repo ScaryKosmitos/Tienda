@@ -267,7 +267,7 @@ class VistaInventario:
         """Números de las tarjetas: se calculan con todos los productos, sin los filtros de la tabla."""
         productos = db.buscar_productos()
         hoy = date.today().strftime("%Y-%m-%d")
-        ventas_hoy = sum(v["total"] for v in db.obtener_ventas(hoy, hoy) if not v["anulada"])
+        ventas_hoy = db.resumen_ventas(hoy, hoy)["total"]
         self.valor_productos.value = formatear_numero(len(productos))
         self.valor_bajo.value = formatear_numero(sum(1 for p in productos if p["stock"] < STOCK_BAJO))
         self.valor_inventario.value = formatear_precio(sum(p["precio"] * p["stock"] for p in productos))
