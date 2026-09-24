@@ -62,9 +62,15 @@ def crear_tema():
     """Tema de la aplicación con las letras e íconos del tamaño elegido."""
     # Los íconos de los botones miden 18 en Material Design
     estilo_botones = ft.ButtonStyle(icon_size=px(18))
+    # Flet no mezcla estos estilos con los de Material: los reemplaza enteros, así
+    # que sin un color los textos quedaban sin color propio y algunos seguían en
+    # blanco al pasar de modo oscuro a claro. ON_SURFACE es el color normal del
+    # texto y Flet lo calcula aparte para el tema claro y para el oscuro
     return ft.Theme(
         color_scheme_seed=COLOR_MARCA,
-        text_theme=ft.TextTheme(**{nombre: ft.TextStyle(size=px(t)) for nombre, t in _TAMANOS_TEMA.items()}),
+        text_theme=ft.TextTheme(**{
+            nombre: ft.TextStyle(size=px(t), color=ft.Colors.ON_SURFACE) for nombre, t in _TAMANOS_TEMA.items()
+        }),
         icon_theme=ft.IconTheme(size=px(24)),
         filled_button_theme=ft.FilledButtonTheme(style=estilo_botones),
         outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_botones),
