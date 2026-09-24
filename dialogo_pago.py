@@ -1,6 +1,7 @@
 """
 Diálogo de cobro: se escribe (o se marca con los botones de billetes) con
-cuánto paga el cliente y muestra el cambio. También permite fiar la venta.
+cuánto paga el cliente y muestra el cambio. También permite cobrar por Nequi
+y fiar la venta.
 """
 import asyncio
 
@@ -14,11 +15,15 @@ from formato import formatear_numero, formatear_precio, leer_precio
 # Botones de billetes (y la moneda de $1.000): cada toque suma al monto recibido
 BILLETES = [1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000]
 
+# Color de Nequi, para reconocer el botón de un vistazo
+COLOR_NEQUI = ft.Colors.PURPLE_700
+
 
 async def pedir_pago(page, total):
     """
-    Abre el diálogo de cobro y espera. Retorna (dinero_recibido, None) si se
-    cobra, (None, id_cliente) si se fía, o None si se cancela.
+    Abre el diálogo de cobro y espera. Retorna None si se cancela, o un
+    diccionario con 'medio' (db.EFECTIVO, db.NEQUI o None si se fía), 'pago'
+    (dinero recibido en efectivo, o None) y 'cliente_id' (a quién se fía, o None).
     """
     resultado = asyncio.get_running_loop().create_future()
 
@@ -55,7 +60,7 @@ async def pedir_pago(page, total):
         elif error := db.validar_pago(pago, total):
             campo_pago.error_text = error
         else:
-            terminar((pago, None))
+            terminar({"medio": db.EFECTIVO, "pago": pago, "cliente_id": None})
             return
         page.update()
 
@@ -83,7 +88,17 @@ async def pedir_pago(page, total):
             f"Quedará debiendo {formatear_precio(cliente['debe'] + total)}.",
             si="Fiar",
         ):
-            terminar((None, id_cliente))
+            terminar({"medio": None, "pago": None, "cliente_id": id_cliente})
+
+    async def por_nequi(_):
+        # Algunos clientes muestran comprobantes falsos: se pide revisar que llegó
+        if await preguntar(
+            page, "Pago por Nequi",
+            f"¿Ya revisaste en tu Nequi que llegaron los {formatear_precio(total)}?\n\n"
+            "Revísalo en la app, no en el celular del cliente.",
+            si="Sí, llegó",
+        ):
+            terminar({"medio": db.NEQUI, "pago": None, "cliente_id": None})
 
     def borrar(_):
         campo_pago.value = ""
@@ -121,11 +136,24 @@ async def pedir_pago(page, total):
                 ft.Text("Toca los billetes que te dieron:", color=ft.Colors.ON_SURFACE_VARIANT),
                 *filas_billetes,
                 texto_cambio,
+                ft.Divider(height=1),
+                ft.Text("¿No paga en efectivo?", color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Row(spacing=8, controls=[
+                    ft.OutlinedButton(
+                        "Pagó por Nequi", icon=ft.Icons.PHONE_ANDROID, height=px(48), expand=True,
+                        style=ft.ButtonStyle(color=COLOR_NEQUI, shape=ft.RoundedRectangleBorder(radius=12)),
+                        on_click=por_nequi,
+                    ),
+                    ft.OutlinedButton(
+                        "Fiar", icon=ft.Icons.MENU_BOOK_OUTLINED, height=px(48), expand=True,
+                        style=ft.ButtonStyle(color=ft.Colors.ORANGE_800, shape=ft.RoundedRectangleBorder(radius=12)),
+                        on_click=fiar,
+                    ),
+                ]),
             ],
         ),
         actions=[
             ft.TextButton("Cancelar", on_click=lambda _: terminar(None)),
-            ft.OutlinedButton("Fiar", icon=ft.Icons.MENU_BOOK_OUTLINED, on_click=fiar),
             ft.OutlinedButton("Pago exacto", on_click=pago_exacto),
             ft.FilledButton(
                 "Cobrar", icon=ft.Icons.POINT_OF_SALE,

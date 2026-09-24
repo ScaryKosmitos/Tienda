@@ -89,7 +89,7 @@ def _ancho(textos, minimo=10, maximo=45):
 
 def _hoja_ventas(hoja, desde, hasta, generado):
     ventas = db.obtener_ventas(desde, hasta)
-    encabezados = ("ID Venta", "Recibo", "Fecha y Hora", "Producto", "Cantidad", "Total", "Estado", "Fiado a")
+    encabezados = ("ID Venta", "Recibo", "Fecha y Hora", "Producto", "Cantidad", "Total", "Pago", "Fiado a")
     fila = _preparar_hoja(
         hoja, f"Ventas: {describir_periodo(desde, hasta)} (generado {generado})", encabezados
     )
@@ -102,7 +102,7 @@ def _hoja_ventas(hoja, desde, hasta, generado):
         valores = (
             venta["id"], numero_recibo(venta["recibo_id"]) if venta["recibo_id"] else "—",
             datetime.strptime(venta["fecha"], "%Y-%m-%d %H:%M:%S"), venta["nombre_producto"],
-            venta["cantidad"], total, "Anulada" if anulada else ("Fiado" if venta["cliente"] else "OK"),
+            venta["cantidad"], total, "Anulada" if anulada else (venta["medio"] or "Fiado"),
             venta["cliente"] or "",
         )
         for columna, valor in enumerate(valores, start=1):

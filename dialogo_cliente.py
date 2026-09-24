@@ -141,7 +141,7 @@ async def pedir_texto(page, titulo, etiqueta, guardar, valor=""):
 
 
 async def pedir_abono(page, cliente):
-    """Pide cuánto abona el cliente. Retorna el monto, o None si se cancela."""
+    """Pide cuánto abona el cliente y cómo paga. Retorna (monto, medio), o None si se cancela."""
     resultado = asyncio.get_running_loop().create_future()
     debe = cliente["debe"]
 
@@ -178,7 +178,7 @@ async def pedir_abono(page, cliente):
         elif round(monto, 2) > debe:
             campo.error_text = f"Solo debe {formatear_precio(debe)}."
         else:
-            terminar(monto)
+            terminar((monto, selector_medio.selected[0]))
             return
         page.update()
 
@@ -186,6 +186,13 @@ async def pedir_abono(page, cliente):
         campo.value = formatear_numero(debe)
         aceptar()
 
+    selector_medio = ft.SegmentedButton(
+        selected=[db.EFECTIVO],
+        segments=[
+            ft.Segment(value=db.EFECTIVO, label=ft.Text("Efectivo"), icon=icono_px(ft.Icons.PAYMENTS_OUTLINED)),
+            ft.Segment(value=db.NEQUI, label=ft.Text("Nequi"), icon=icono_px(ft.Icons.PHONE_ANDROID)),
+        ],
+    )
     campo = ft.TextField(
         label="Abona ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
         text_align=ft.TextAlign.CENTER, autofocus=True, on_change=actualizar, on_submit=aceptar,
@@ -200,6 +207,8 @@ async def pedir_abono(page, cliente):
                         text_align=ft.TextAlign.CENTER),
                 campo,
                 texto_queda,
+                ft.Text("¿Cómo paga?", color=ft.Colors.ON_SURFACE_VARIANT),
+                selector_medio,
             ],
         ),
         actions=[

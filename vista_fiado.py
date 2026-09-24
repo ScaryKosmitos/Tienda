@@ -199,7 +199,8 @@ class VistaFiado:
                     ft.Column(
                         spacing=0, expand=True,
                         controls=[
-                            ft.Text(movimiento["tipo"] + (" (anulado)" if anulado else ""),
+                            ft.Text(movimiento["tipo"] + (f" ({movimiento['medio']})" if movimiento["medio"] else "")
+                                    + (" (anulado)" if anulado else ""),
                                     weight=ft.FontWeight.W_500, color=ft.Colors.OUTLINE if anulado else None),
                             ft.Text(movimiento["fecha"][:16], size=px(12), color=ft.Colors.ON_SURFACE_VARIANT),
                         ],
@@ -259,10 +260,11 @@ class VistaFiado:
         cliente = db.obtener_cliente(self.id_cliente)
         if not cliente:
             return self.mostrar()
-        monto = await pedir_abono(self.page, cliente)
-        if monto is None:
+        abono = await pedir_abono(self.page, cliente)
+        if abono is None:
             return
-        exito, mensaje = db.registrar_abono(self.id_cliente, monto)
+        monto, medio = abono
+        exito, mensaje = db.registrar_abono(self.id_cliente, monto, medio)
         if exito:
             avisar(self.page, mensaje)
         else:

@@ -13,6 +13,11 @@ from formato import clave_orden, formatear_cambio, formatear_numero, formatear_p
 STOCK_MAXIMO = 1_000_000
 PRECIO_MAXIMO = 100_000_000
 
+# Medios de pago de las ventas y de los abonos del fiado
+EFECTIVO = "Efectivo"
+NEQUI = "Nequi"
+MEDIOS = (EFECTIVO, NEQUI)
+
 # El cambio de una venta no puede pasar de esto. Si pasa, casi seguro se
 # escaneó un código de barras en el campo del pago (ej: 7702004003501)
 CAMBIO_MAXIMO = 1_000_000
@@ -152,6 +157,36 @@ def inicializar_db():
             columnas_recibos = [fila[1] for fila in cursor.execute("PRAGMA table_info(recibos)")]
             if "cliente_id" not in columnas_recibos:
                 cursor.execute("ALTER TABLE recibos ADD COLUMN cliente_id INTEGER REFERENCES clientes (id)")
+
+            # Medio de pago de cada venta (NULL en las fiadas) y de cada abono. Lo
+            # registrado antes de que existiera se pagó en efectivo
+            if "medio" not in columnas_recibos:
+                cursor.execute("ALTER TABLE recibos ADD COLUMN medio TEXT")
+                cursor.execute("UPDATE recibos SET medio = 'Efectivo' WHERE cliente_id IS NULL")
+            columnas_fiado = [fila[1] for fila in cursor.execute("PRAGMA table_info(fiado)")]
+            if "medio" not in columnas_fiado:
+                cursor.execute("ALTER TABLE fiado ADD COLUMN medio TEXT")
+                cursor.execute("UPDATE fiado SET medio = 'Efectivo' WHERE tipo = 'Abono'")
+
+            # Base: el efectivo con el que empieza la caja cada día
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS caja_base (
+                    fecha TEXT PRIMARY KEY,
+                    monto REAL NOT NULL
+                )
+            """)
+
+            # Salidas: efectivo que se saca de la caja (pagos a proveedores, gastos,
+            # retiros). Las registradas por error se anulan, no se borran
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS salidas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fecha TEXT NOT NULL,
+                    monto REAL NOT NULL,
+                    motivo TEXT NOT NULL,
+                    anulada INTEGER NOT NULL DEFAULT 0
+                )
+            """)
     finally:
         conexion.close()
 
@@ -444,19 +479,24 @@ def validar_pago(pago, total):
     return None
 
 
-def registrar_venta_carrito(items, pago=None, cliente_id=None):
+def registrar_venta_carrito(items, pago=None, cliente_id=None, medio=EFECTIVO):
     """
     Registra la venta de varios productos a la vez. 'items' es una lista de
     (id_producto, cantidad). Verifica el stock de cada uno, lo descuenta y
     registra una línea por producto, todas con la misma fecha y hora y el
     mismo recibo. 'pago' es el dinero que entregó el cliente (None = pago exacto).
     Si se da 'cliente_id', la venta completa se le fía a ese cliente (pago = 0).
+    'medio' es EFECTIVO o NEQUI; por Nequi se paga el total exacto.
     El nombre y el precio se leen de la base de datos en la misma transacción.
     Si un solo producto falla, no se registra nada: la venta es todo o nada.
     Retorna (exito: bool, mensaje: str, id_recibo: int o None).
     """
     if not items:
         return False, "El carrito está vacío.", None
+    if cliente_id is not None:
+        medio = None
+    elif medio not in MEDIOS:
+        return False, f"Medio de pago desconocido: {medio}", None
 
     conexion = conectar()
     try:
@@ -472,7 +512,8 @@ def registrar_venta_carrito(items, pago=None, cliente_id=None):
 
             # El total y el pago se completan al final, cuando se conoce el total
             cursor.execute(
-                "INSERT INTO recibos (fecha, total, pago, cliente_id) VALUES (?, 0, 0, ?)", (fecha_actual, cliente_id)
+                "INSERT INTO recibos (fecha, total, pago, cliente_id, medio) VALUES (?, 0, 0, ?, ?)",
+                (fecha_actual, cliente_id, medio),
             )
             id_recibo = cursor.lastrowid
 
@@ -504,7 +545,7 @@ def registrar_venta_carrito(items, pago=None, cliente_id=None):
                     "INSERT INTO fiado (cliente_id, fecha, tipo, monto, recibo_id) VALUES (?, ?, 'Fiado', ?, ?)",
                     (cliente_id, fecha_actual, total_venta, id_recibo),
                 )
-            elif pago is None:
+            elif pago is None or medio == NEQUI:
                 pago = total_venta
             else:
                 error = validar_pago(pago, total_venta)
@@ -514,6 +555,8 @@ def registrar_venta_carrito(items, pago=None, cliente_id=None):
 
         if cliente_id is not None:
             return True, f"Venta fiada. Total: {formatear_precio(total_venta)}", id_recibo
+        if medio == NEQUI:
+            return True, f"Venta pagada por Nequi. Total: {formatear_precio(total_venta)}", id_recibo
         return True, f"Venta realizada. Total: {formatear_precio(total_venta)}", id_recibo
     except _VentaRechazada as rechazo:
         return False, str(rechazo), None
@@ -523,15 +566,15 @@ def registrar_venta_carrito(items, pago=None, cliente_id=None):
 
 def obtener_recibo(id_recibo):
     """
-    Retorna un diccionario con los datos del recibo (id, fecha, total, pago y
-    cliente, que es el nombre del cliente si la venta fue fiada o None) y sus
+    Retorna un diccionario con los datos del recibo (id, fecha, total, pago,
+    medio y cliente, que es el nombre del cliente si la venta fue fiada o None) y sus
     'lineas' (nombre_producto, cantidad, total, anulada), o None si no existe.
     """
     conexion = conectar()
     try:
         cursor = conexion.cursor()
         cursor.execute("""
-            SELECT r.id, r.fecha, r.total, r.pago, c.nombre AS cliente
+            SELECT r.id, r.fecha, r.total, r.pago, r.medio, c.nombre AS cliente
             FROM recibos r LEFT JOIN clientes c ON c.id = r.cliente_id
             WHERE r.id = ?
         """, (id_recibo,))
@@ -563,15 +606,17 @@ def obtener_ventas(desde=None, hasta=None):
     """
     Retorna las ventas ordenadas de más reciente a más antigua, con las
     columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada,
-    recibo_id (None en las ventas hechas antes de que existieran los recibos)
-    y cliente (nombre del cliente si la venta fue fiada, o None).
+    recibo_id (None en las ventas hechas antes de que existieran los recibos),
+    cliente (nombre del cliente si la venta fue fiada, o None) y medio
+    (EFECTIVO o NEQUI; None si fue fiada).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
     condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
 
     consulta = """
         SELECT v.id, v.producto_id, v.nombre_producto, v.cantidad, v.total, v.fecha, v.anulada, v.recibo_id,
-               c.nombre AS cliente
+               c.nombre AS cliente,
+               CASE WHEN r.cliente_id IS NOT NULL THEN NULL ELSE COALESCE(r.medio, 'Efectivo') END AS medio
         FROM ventas v
         LEFT JOIN recibos r ON r.id = v.recibo_id
         LEFT JOIN clientes c ON c.id = r.cliente_id
@@ -828,20 +873,25 @@ def eliminar_cliente(id_cliente):
         conexion.close()
 
 def obtener_movimientos_fiado(id_cliente):
-    """Movimientos de la cuenta del cliente (id, fecha, tipo, monto, recibo_id, anulado), del más reciente al más antiguo."""
+    """
+    Movimientos de la cuenta del cliente (id, fecha, tipo, monto, recibo_id,
+    anulado y medio, que solo tienen los abonos), del más reciente al más antiguo.
+    """
     conexion = conectar()
     try:
         cursor = conexion.cursor()
         cursor.execute(
-            "SELECT id, fecha, tipo, monto, recibo_id, anulado FROM fiado WHERE cliente_id = ? ORDER BY id DESC",
+            "SELECT id, fecha, tipo, monto, recibo_id, anulado, medio FROM fiado WHERE cliente_id = ? ORDER BY id DESC",
             (id_cliente,),
         )
         return cursor.fetchall()
     finally:
         conexion.close()
 
-def registrar_abono(id_cliente, monto):
-    """El cliente paga parte (o todo) lo que debe. Retorna (exito: bool, mensaje: str)."""
+def registrar_abono(id_cliente, monto, medio=EFECTIVO):
+    """El cliente paga parte (o todo) lo que debe, en efectivo o por Nequi. Retorna (exito: bool, mensaje: str)."""
+    if medio not in MEDIOS:
+        return False, f"Medio de pago desconocido: {medio}"
     if not math.isfinite(monto) or monto <= 0:
         return False, "El abono debe ser mayor a 0."
     cliente = obtener_cliente(id_cliente)
@@ -856,8 +906,8 @@ def registrar_abono(id_cliente, monto):
     try:
         with conexion:
             conexion.execute(
-                "INSERT INTO fiado (cliente_id, fecha, tipo, monto) VALUES (?, ?, 'Abono', ?)",
-                (id_cliente, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), -monto),
+                "INSERT INTO fiado (cliente_id, fecha, tipo, monto, medio) VALUES (?, ?, 'Abono', ?, ?)",
+                (id_cliente, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), -monto, medio),
             )
     finally:
         conexion.close()
@@ -885,3 +935,143 @@ def anular_abono(id_movimiento):
         return True, f"Se anuló el abono de {formatear_precio(-res['monto'])}."
     finally:
         conexion.close()
+
+# --- CAJA ---
+
+def validar_monto_caja(monto):
+    """Retorna un mensaje de error si el monto de una base o una salida no es válido, o None."""
+    if not math.isfinite(monto) or monto < 0:
+        return "El monto no puede ser negativo."
+    if monto > PRECIO_MAXIMO:
+        return f"El monto no puede ser mayor a {formatear_precio(PRECIO_MAXIMO)}."
+    return None
+
+def obtener_base(fecha):
+    """Base de la caja del día 'AAAA-MM-DD', o None si no se registró."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT monto FROM caja_base WHERE fecha = ?", (fecha,))
+        res = cursor.fetchone()
+        return res["monto"] if res else None
+    finally:
+        conexion.close()
+
+def poner_base(fecha, monto):
+    """Registra (o corrige) la base de la caja del día 'AAAA-MM-DD'. Retorna (exito: bool, mensaje: str)."""
+    error = validar_monto_caja(monto)
+    if error:
+        return False, error
+    conexion = conectar()
+    try:
+        with conexion:
+            conexion.execute(
+                "INSERT INTO caja_base (fecha, monto) VALUES (?, ?) "
+                "ON CONFLICT (fecha) DO UPDATE SET monto = excluded.monto",
+                (fecha, monto),
+            )
+        return True, f"Base registrada: {formatear_precio(monto)}."
+    finally:
+        conexion.close()
+
+def registrar_salida(monto, motivo):
+    """Efectivo que se saca de la caja ahora. Retorna (exito: bool, mensaje: str)."""
+    motivo = " ".join(motivo.split())
+    error = validar_monto_caja(monto)
+    if error:
+        return False, error
+    if monto == 0:
+        return False, "El monto debe ser mayor a 0."
+    if not motivo:
+        return False, "Escribe el motivo (ej: pago al proveedor de gaseosas)."
+    if len(motivo) > 100:
+        return False, "El motivo no puede tener más de 100 letras."
+    conexion = conectar()
+    try:
+        with conexion:
+            conexion.execute(
+                "INSERT INTO salidas (fecha, monto, motivo) VALUES (?, ?, ?)",
+                (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), monto, motivo),
+            )
+        return True, f"Salida de {formatear_precio(monto)} registrada."
+    finally:
+        conexion.close()
+
+def obtener_salidas(fecha):
+    """Salidas del día 'AAAA-MM-DD' (id, fecha, monto, motivo, anulada), de la más reciente a la más antigua."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute(
+            "SELECT id, fecha, monto, motivo, anulada FROM salidas WHERE date(fecha) = ? ORDER BY id DESC", (fecha,)
+        )
+        return cursor.fetchall()
+    finally:
+        conexion.close()
+
+def anular_salida(id_salida):
+    """Anula una salida registrada por error. Retorna (exito: bool, mensaje: str)."""
+    conexion = conectar()
+    try:
+        with conexion:
+            cursor = conexion.cursor()
+            cursor.execute("SELECT monto, anulada FROM salidas WHERE id = ?", (id_salida,))
+            res = cursor.fetchone()
+            if not res:
+                return False, "La salida no existe."
+            if res["anulada"]:
+                return False, "Esa salida ya estaba anulada."
+            cursor.execute("UPDATE salidas SET anulada = 1 WHERE id = ?", (id_salida,))
+        return True, f"Se anuló la salida de {formatear_precio(res['monto'])}."
+    finally:
+        conexion.close()
+
+def resumen_caja(fecha):
+    """
+    Resumen del día 'AAAA-MM-DD' para el cierre de caja. Retorna un
+    diccionario con: base (None si no se registró), ventas_efectivo,
+    abonos_efectivo, salidas y en_caja (lo que debería haber en efectivo:
+    base + ventas y abonos en efectivo - salidas); ventas_nequi y
+    abonos_nequi; fiado (lo que se fió ese día) y total_vendido.
+    Las ventas anuladas no cuentan.
+    """
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("""
+            SELECT COALESCE(SUM(CASE WHEN r.cliente_id IS NULL AND COALESCE(r.medio, 'Efectivo') = 'Efectivo'
+                                     THEN v.total END), 0) AS efectivo,
+                   COALESCE(SUM(CASE WHEN r.cliente_id IS NULL AND r.medio = 'Nequi' THEN v.total END), 0) AS nequi,
+                   COALESCE(SUM(CASE WHEN r.cliente_id IS NOT NULL THEN v.total END), 0) AS fiado,
+                   COALESCE(SUM(v.total), 0) AS total
+            FROM ventas v LEFT JOIN recibos r ON r.id = v.recibo_id
+            WHERE v.anulada = 0 AND date(v.fecha) = ?
+        """, (fecha,))
+        ventas = cursor.fetchone()
+        cursor.execute("""
+            SELECT COALESCE(SUM(CASE WHEN COALESCE(medio, 'Efectivo') = 'Efectivo' THEN -monto END), 0) AS efectivo,
+                   COALESCE(SUM(CASE WHEN medio = 'Nequi' THEN -monto END), 0) AS nequi
+            FROM fiado WHERE tipo = 'Abono' AND anulado = 0 AND date(fecha) = ?
+        """, (fecha,))
+        abonos = cursor.fetchone()
+        cursor.execute(
+            "SELECT COALESCE(SUM(monto), 0) FROM salidas WHERE anulada = 0 AND date(fecha) = ?", (fecha,)
+        )
+        salidas = cursor.fetchone()[0]
+        cursor.execute("SELECT monto FROM caja_base WHERE fecha = ?", (fecha,))
+        base = cursor.fetchone()
+    finally:
+        conexion.close()
+
+    base = base["monto"] if base else None
+    return {
+        "base": base,
+        "ventas_efectivo": ventas["efectivo"],
+        "abonos_efectivo": abonos["efectivo"],
+        "salidas": salidas,
+        "en_caja": round((base or 0) + ventas["efectivo"] + abonos["efectivo"] - salidas, 2),
+        "ventas_nequi": ventas["nequi"],
+        "abonos_nequi": abonos["nequi"],
+        "fiado": ventas["fiado"],
+        "total_vendido": ventas["total"],
+    }

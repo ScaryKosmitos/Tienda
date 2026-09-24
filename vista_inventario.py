@@ -624,10 +624,11 @@ class VistaInventario:
         if cobro is None:
             await self.campo_escanear.focus()
             return
-        pago, id_cliente = cobro
 
         items = [(id_producto, linea["cantidad"]) for id_producto, linea in self.carrito.items()]
-        exito, mensaje, id_recibo = db.registrar_venta_carrito(items, pago, id_cliente)
+        exito, mensaje, id_recibo = db.registrar_venta_carrito(
+            items, cobro["pago"], cobro["cliente_id"], cobro["medio"] or db.EFECTIVO,
+        )
         if not exito:
             mostrar_mensaje(self.page, "Error en Venta", mensaje, error=True)
             return

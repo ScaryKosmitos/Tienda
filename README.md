@@ -36,10 +36,19 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Abonos parciales o **Paga todo**. Un abono registrado por error se anula (pide la clave) y la deuda vuelve a subir.
 - Si se anula una venta fiada, se le descuenta al cliente de lo que debe.
 
+**Medios de pago y caja**
+- Al cobrar se puede pagar en efectivo o con **Pagó por Nequi**, que antes pregunta si ya se revisó en la
+  app de Nequi que llegó la plata (para no caer con comprobantes falsos). Los abonos del fiado también
+  se registran en efectivo o por Nequi.
+- Pantalla **Caja**: la base con la que empieza el día, las salidas de efectivo (pagos a proveedores,
+  gastos, retiros, con su motivo) y el resumen para cerrar la caja: base + ventas y abonos en efectivo
+  − salidas = **lo que debería haber en la caja**. Aparte muestra lo que entró por Nequi y lo que se fió.
+  Se puede ver cualquier día anterior. Anular una salida registrada por error pide la clave.
+
 **Reportes**
 - Historial de ventas con filtros de fecha (hoy, esta semana, este mes o un rango).
 - Ranking de productos más vendidos del período, con el porcentaje de lo vendido.
-- Exportación a Excel (.xlsx) con cuatro hojas: ventas (con lo fiado y a quién), más vendidos, inventario
+- Exportación a Excel (.xlsx) con cuatro hojas: ventas (con el medio de pago y lo fiado), más vendidos, inventario
   con su valor en stock y fiado (lo que debe cada cliente).
 
 **Comodidad**
@@ -141,6 +150,10 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 | Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas** (pide la clave si hay una). |
 | Fiar una venta | Al cobrar, pulsar **Fiar**, elegir el cliente (o escribir su nombre para crearlo) y confirmar. |
 | Registrar un abono | Ir a **Fiado**, elegir el cliente y pulsar **Registrar abono** (o **Paga todo** si paga lo que debe). |
+| Cobrar por Nequi | Al cobrar, revisar en la app de Nequi que llegó la plata y pulsar **Pagó por Nequi**. |
+| Empezar el día | Ir a **Caja** y pulsar **Registrar base** con el efectivo que hay en la caja. |
+| Sacar plata de la caja | Ir a **Caja**, pulsar **Registrar salida** y escribir cuánto y para qué. |
+| Cerrar la caja | Ir a **Caja**, contar el efectivo y compararlo con **Debería haber en la caja**. |
 | Crear, cambiar o quitar la clave | Pulsar el **candado** de la barra lateral. |
 | Ver ventas, ranking o exportar | Ir a **Ventas**, elegir el período (o el calendario) y usar las pestañas o **Exportar a Excel**. |
 
@@ -156,6 +169,7 @@ Tienda/
 ├── vista_inventario.py  Pantalla principal: resumen, tabla de productos, formulario y carrito
 ├── vista_ventas.py      Historial de ventas, más vendidos, anulaciones y exportación
 ├── vista_fiado.py       Fiado: lo que debe cada cliente, sus movimientos y los abonos
+├── vista_caja.py        Caja: base del día, salidas de efectivo y resumen para el cierre
 ├── vista_entradas.py    Entradas de mercancía y movimientos de stock
 ├── dialogo_pago.py      Diálogo de cobro con botones de billetes y el cálculo del cambio
 ├── dialogo_clave.py     Diálogos para pedir la clave y para crearla, cambiarla o quitarla
@@ -200,7 +214,12 @@ Por eso la lógica de datos puede usarse o probarse sin abrir ninguna ventana.
 - **entradas**: movimientos de stock (stock inicial, entradas de mercancía, ajustes manuales y anulaciones de ventas).
 - **clientes**: los clientes a los que se les fía (solo el nombre, sin repetir).
 - **fiado**: la cuenta de cada cliente. Lo fiado suma y los abonos y las ventas anuladas restan; lo que
-  debe es la suma. Los abonos registrados por error se marcan como anulados, no se borran.
+  debe es la suma. Los abonos registrados por error se marcan como anulados, no se borran. Cada abono
+  guarda si se pagó en efectivo o por Nequi.
+- **caja_base**: la base (efectivo al empezar) de cada día.
+- **salidas**: el efectivo que se saca de la caja, con su motivo. Las registradas por error se anulan.
+
+Los recibos guardan además el medio de pago (efectivo o Nequi; vacío en las ventas fiadas).
 
 Un producto que ya tiene ventas no se puede eliminar, para no dejar el historial incompleto.
 

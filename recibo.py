@@ -56,6 +56,8 @@ def texto_recibo(recibo):
     if recibo["cliente"]:
         # Venta fiada: no hubo pago ni cambio
         lineas.append(_fila("FIADO A", recibo["cliente"]))
+    elif recibo["medio"] == db.NEQUI:
+        lineas.append(_fila("Pagado por", "Nequi"))
     else:
         lineas += [
             _fila("Recibido", formatear_precio(recibo["pago"])),

@@ -131,7 +131,7 @@ class VistaVentas:
     def crear_pestana_ventas(self):
         self.tabla_ventas = crear_tabla(
             [("Recibo", False), ("Producto", False), ("Cant.", True), ("Total", True), ("Fecha y hora", False),
-             ("Estado", False), ("", False)],
+             ("Pago", False), ("", False)],
             show_checkbox_column=True,
         )
         self.sin_ventas = texto_vacio(ft.Icons.RECEIPT_LONG_OUTLINED, "No hay ventas en este período")
@@ -230,12 +230,17 @@ class VistaVentas:
     def mostrar_ventas(self, ventas, periodo):
         validas = [v for v in ventas if not v["anulada"]]
         dinero_total = sum(v["total"] for v in validas)
-        fiado = sum(v["total"] for v in validas if v["cliente"])
         self.tabla_ventas.rows = [self.fila_venta(v) for v in ventas]
         self.sin_ventas.visible = not ventas
+        # Cuánto de lo vendido fue por Nequi o fiado (lo demás, en efectivo)
+        partes = []
+        for nombre, total in (("Nequi", sum(v["total"] for v in validas if v["medio"] == db.NEQUI)),
+                              ("fiado", sum(v["total"] for v in validas if v["cliente"]))):
+            if total:
+                partes.append(f"{nombre}: {formatear_precio(total)}")
         self.texto_total.value = f"Total vendido ({periodo}): {formatear_precio(dinero_total)}"
-        if fiado:
-            self.texto_total.value += f", de eso fiado: {formatear_precio(fiado)}"
+        if partes:
+            self.texto_total.value += f" (de eso {', '.join(partes)})"
         self.texto_total.value += f"  ·  {len(validas)} líneas de venta"
         self.actualizar_boton_anular()
 
@@ -278,7 +283,9 @@ class VistaVentas:
             pastilla = etiqueta("Fiado", ft.Colors.ORANGE_800)
             pastilla.tooltip = f"Fiado a {venta['cliente']}"
             return pastilla
-        return etiqueta("OK", COLOR_EXITO)
+        if venta["medio"] == db.NEQUI:
+            return etiqueta("Nequi", ft.Colors.PURPLE_700)
+        return etiqueta("Efectivo", COLOR_EXITO)
 
     def actualizar_boton_anular(self):
         cantidad = len(self.seleccion)
