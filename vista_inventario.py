@@ -207,6 +207,14 @@ class VistaInventario:
 
         self.tabla.rows = [self.fila_producto(p) for p in productos[:MAX_FILAS]]
         self.sin_productos.visible = not productos
+        # Sin filtros, una tabla vacía es que todavía no se ha registrado ningún producto
+        hay_filtros = self.campo_buscar.value.strip() or categoria != "Todas" or self.check_stock_bajo.value
+        icono, mensaje = self.sin_productos.controls
+        if hay_filtros:
+            icono.icon, mensaje.value = ft.Icons.SEARCH_OFF, "No hay productos que coincidan"
+        else:
+            icono.icon = ft.Icons.INVENTORY_2_OUTLINED
+            mensaje.value = "Todavía no hay productos.\nPulsa «Nuevo producto» para agregar el primero."
         self.aviso_limite.visible = len(productos) > MAX_FILAS
         self.aviso_limite.value = (
             f"Se muestran {formatear_numero(MAX_FILAS)} de {formatear_numero(len(productos))} productos. "
