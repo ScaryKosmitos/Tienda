@@ -56,6 +56,24 @@ Para vender escaneando sirve cualquier lector de códigos de barras USB que func
 
 ## Instalación
 
+### En Windows (computador de la tienda)
+
+1. Instalar Python desde [python.org/downloads](https://www.python.org/downloads/). En la primera
+   pantalla del instalador, marcar la casilla **"Add python.exe to PATH"**.
+2. Copiar la carpeta de la tienda en una ubicación del usuario, por ejemplo `C:\Users\<usuario>\Tienda`
+   (no en `Archivos de programa`, porque ahí Windows no deja guardar la base de datos).
+   Se puede descargar desde GitHub con **Code → Download ZIP** y descomprimir.
+3. Hacer doble clic en **`instalar_windows.bat`**. Prepara todo (necesita internet la primera vez)
+   y crea el ícono **Tienda** en el Escritorio y en el menú Inicio.
+
+Desde ahí la tienda se abre con ese ícono. Si alguna vez no abre, el error queda anotado en
+`errores.log`, dentro de la carpeta de la tienda.
+
+Para **actualizar** la tienda, reemplazar los archivos del programa por los nuevos (sin borrar
+`inventario.db` ni las carpetas `respaldos` y `recibos`) y volver a ejecutar `instalar_windows.bat`.
+
+### En Linux (o para desarrollar)
+
 1. Descargar o clonar el proyecto y entrar en la carpeta:
 
    ```bash
@@ -119,6 +137,9 @@ Tienda/
 ├── exportar.py          Generación del reporte de Excel
 ├── respaldar.py         Copias de seguridad de la base de datos
 ├── configuracion.py     Preferencias guardadas (tamaño de letra) en configuracion.json
+├── instalar.py          Instalador: entorno de Python, librerías y accesos directos de Windows
+├── instalar_windows.bat Doble clic para instalar en Windows (ejecuta instalar.py)
+├── tienda.ico           Ícono de la aplicación
 └── requirements.txt     Librerías necesarias
 ```
 

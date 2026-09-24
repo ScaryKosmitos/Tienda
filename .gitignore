@@ -5,3 +5,4 @@ respaldos/
 .venv/
 recibos/
 configuracion.json
+errores.log

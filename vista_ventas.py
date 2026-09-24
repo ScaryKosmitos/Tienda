@@ -324,7 +324,8 @@ class VistaVentas:
         except ImportError:
             mostrar_mensaje(
                 self.page, "Falta una Librería",
-                "Para exportar a Excel hay que instalar 'openpyxl':\n\n.venv/bin/pip install openpyxl",
+                "Para exportar a Excel hay que instalar 'openpyxl'. En Windows, vuelve a ejecutar "
+                "instalar_windows.bat; en Linux: .venv/bin/pip install openpyxl",
                 error=True,
             )
             return

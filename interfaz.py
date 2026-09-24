@@ -2,6 +2,8 @@
 Ventana principal: barra lateral de navegación y las tres pantallas
 (inventario y venta, historial de ventas y entradas de mercancía).
 """
+import os
+
 import flet as ft
 
 import base_datos as db
@@ -33,6 +35,8 @@ class Aplicacion:
         page.window.min_height = 680
         # Abre ocupando toda la pantalla: hay más espacio, sobre todo con letra grande
         page.window.maximized = True
+        # Ícono de la ventana y de la barra de tareas (solo tiene efecto en Windows)
+        page.window.icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tienda.ico")
         # Se pregunta antes de cerrar si hay un carrito sin cobrar
         page.window.prevent_close = True
         page.window.on_event = self.al_evento_ventana

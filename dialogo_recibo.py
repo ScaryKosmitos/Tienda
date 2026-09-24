@@ -2,6 +2,7 @@
 Diálogo que muestra el recibo de una venta y permite abrirlo en el navegador
 para imprimirlo o guardarlo como PDF.
 """
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -9,6 +10,10 @@ import flet as ft
 
 import recibo as rec
 from componentes import mostrar_mensaje, px
+
+# Letra de ancho fijo para que las columnas del recibo queden alineadas.
+# Windows no entiende el nombre genérico "monospace", así que ahí se usa Consolas
+LETRA_RECIBO = "Consolas" if sys.platform == "win32" else "monospace"
 
 
 def mostrar_recibo(page, recibo):
@@ -32,7 +37,7 @@ def mostrar_recibo(page, recibo):
         border_radius=8,
         padding=ft.Padding.symmetric(horizontal=20, vertical=16),
         content=ft.Text(
-            rec.texto_recibo(recibo), font_family="monospace", size=px(14), color=ft.Colors.BLACK, selectable=True,
+            rec.texto_recibo(recibo), font_family=LETRA_RECIBO, size=px(14), color=ft.Colors.BLACK, selectable=True,
         ),
     )
 
