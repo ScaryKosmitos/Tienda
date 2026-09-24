@@ -20,6 +20,58 @@ COLOR_EXITO = ft.Colors.GREEN_700
 COLOR_PELIGRO = ft.Colors.RED
 
 
+# --- TAMAÑO DE LETRA ---
+
+# Opciones del menú "Tamaño de letra": nombre y cuánto se agranda todo
+TAMANOS = [("Normal", 1.0), ("Grande", 1.25), ("Muy grande", 1.5), ("Enorme", 1.75)]
+
+_escala = 1.0
+
+# Tamaños de letra estándar de Material Design (los que usan botones, campos,
+# tablas y diálogos cuando no se les pone un tamaño)
+_TAMANOS_TEMA = {
+    "display_large": 57, "display_medium": 45, "display_small": 36,
+    "headline_large": 32, "headline_medium": 28, "headline_small": 24,
+    "title_large": 22, "title_medium": 16, "title_small": 14,
+    "body_large": 16, "body_medium": 14, "body_small": 12,
+    "label_large": 14, "label_medium": 12, "label_small": 11,
+}
+
+
+def escala():
+    return _escala
+
+
+def poner_escala(valor):
+    """Cambia el tamaño de todo. Las pantallas se deben volver a construir para que se note."""
+    global _escala
+    _escala = valor
+
+
+def px(tamano):
+    """Tamaño (de letra, ícono o ancho) ajustado al tamaño de letra elegido."""
+    return round(tamano * _escala)
+
+
+def icono_px(nombre, tamano=20):
+    """Ícono ajustado al tamaño de letra, para campos, menús y la barra lateral (que no usan el del tema)."""
+    return ft.Icon(nombre, size=px(tamano))
+
+
+def crear_tema():
+    """Tema de la aplicación con las letras e íconos del tamaño elegido."""
+    # Los íconos de los botones miden 18 en Material Design
+    estilo_botones = ft.ButtonStyle(icon_size=px(18))
+    return ft.Theme(
+        color_scheme_seed=COLOR_MARCA,
+        text_theme=ft.TextTheme(**{nombre: ft.TextStyle(size=px(t)) for nombre, t in _TAMANOS_TEMA.items()}),
+        icon_theme=ft.IconTheme(size=px(24)),
+        filled_button_theme=ft.FilledButtonTheme(style=estilo_botones),
+        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_botones),
+        text_button_theme=ft.TextButtonTheme(style=estilo_botones),
+    )
+
+
 # --- AVISOS Y PREGUNTAS ---
 
 def avisar(page, mensaje, error=False):
@@ -28,7 +80,7 @@ def avisar(page, mensaje, error=False):
         ft.Text(mensaje, color=ft.Colors.WHITE if error else None),
         bgcolor=ft.Colors.RED_700 if error else None,
         behavior=ft.SnackBarBehavior.FLOATING,
-        width=520,
+        width=px(520),
     ))
 
 
@@ -40,7 +92,7 @@ def mostrar_mensaje(page, titulo, mensaje, error=False):
             color=COLOR_PELIGRO if error else COLOR_MARCA,
         ),
         title=ft.Text(titulo),
-        content=ft.Text(mensaje, width=420),
+        content=ft.Text(mensaje, width=px(420)),
         actions=[ft.FilledButton("Entendido", on_click=lambda _: page.pop_dialog())],
     ))
 
@@ -58,7 +110,7 @@ async def preguntar(page, titulo, mensaje, si="Sí", no="Cancelar", peligro=Fals
     page.show_dialog(ft.AlertDialog(
         modal=True,
         title=ft.Text(titulo),
-        content=ft.Text(mensaje, width=420),
+        content=ft.Text(mensaje, width=px(420)),
         actions=[
             ft.TextButton(no, on_click=lambda _: responder(False)),
             ft.FilledButton(si, style=estilo, on_click=lambda _: responder(True)),
@@ -115,7 +167,7 @@ def encabezado(titulo, subtitulo, *acciones):
             ft.Column(
                 spacing=0,
                 controls=[
-                    ft.Text(titulo, size=28, weight=ft.FontWeight.BOLD),
+                    ft.Text(titulo, size=px(28), weight=ft.FontWeight.BOLD),
                     ft.Text(subtitulo, color=ft.Colors.ON_SURFACE_VARIANT),
                 ],
             ),
@@ -126,16 +178,21 @@ def encabezado(titulo, subtitulo, *acciones):
 
 def tarjeta_resumen(icono, titulo, color):
     """Tarjeta con un ícono y un número. Retorna (tarjeta, texto_del_valor) para poder actualizarla."""
-    valor = ft.Text("—", size=22, weight=ft.FontWeight.BOLD)
+    # Con letra grande puede no caber todo: el texto termina en "…" en vez de cortarse
+    valor = ft.Text("—", size=px(22), weight=ft.FontWeight.BOLD, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
     tarjeta = panel(
         ft.Row(
             spacing=14,
             controls=[
                 ft.Container(
-                    content=ft.Icon(icono, color=color, size=24),
+                    content=ft.Icon(icono, color=color, size=px(24)),
                     bgcolor=ft.Colors.with_opacity(0.12, color), border_radius=12, padding=10,
                 ),
-                ft.Column([ft.Text(titulo, size=13, color=ft.Colors.ON_SURFACE_VARIANT), valor], spacing=0),
+                ft.Column(
+                    [ft.Text(titulo, size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1,
+                             overflow=ft.TextOverflow.ELLIPSIS), valor],
+                    spacing=0, expand=True,
+                ),
             ],
         ),
         padding=16, expand=True,
@@ -146,7 +203,7 @@ def tarjeta_resumen(icono, titulo, color):
 def etiqueta(texto, color):
     """Pastilla de color suave con texto (ej: el stock o el estado de una venta)."""
     return ft.Container(
-        content=ft.Text(texto, size=13, weight=ft.FontWeight.W_600, color=color),
+        content=ft.Text(texto, size=px(13), weight=ft.FontWeight.W_600, color=color),
         bgcolor=ft.Colors.with_opacity(0.12, color),
         border_radius=20,
         padding=ft.Padding.symmetric(horizontal=12, vertical=4),
@@ -159,12 +216,12 @@ def crear_tabla(columnas, **opciones):
     (título, es_numerica). Las filas se asignan después en tabla.rows.
     """
     return ft.DataTable(
-        heading_row_height=44,
-        data_row_min_height=46,
-        data_row_max_height=46,
+        heading_row_height=px(44),
+        data_row_min_height=px(46),
+        data_row_max_height=px(46),
         column_spacing=24,
         horizontal_lines=ft.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
-        heading_text_style=ft.TextStyle(weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE_VARIANT, size=13),
+        heading_text_style=ft.TextStyle(weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE_VARIANT, size=px(13)),
         columns=[ft.DataColumn(ft.Text(titulo), numeric=numerica) for titulo, numerica in columnas],
         **opciones,
     )
@@ -182,7 +239,7 @@ def texto_vacio(icono, mensaje):
         alignment=ft.MainAxisAlignment.CENTER,
         expand=True,
         controls=[
-            ft.Icon(icono, size=48, color=ft.Colors.OUTLINE),
+            ft.Icon(icono, size=px(48), color=ft.Colors.OUTLINE),
             ft.Text(mensaje, color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER),
         ],
     )

@@ -4,3 +4,4 @@ inventario.db
 respaldos/
 .venv/
 recibos/
+configuracion.json

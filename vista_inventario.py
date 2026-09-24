@@ -2,14 +2,16 @@
 Pantalla principal: resumen, tabla de productos, formulario de producto
 (en un diálogo) y carrito de venta con lector de códigos de barras.
 """
+import asyncio
 from datetime import date
 
 import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla, encabezado,
-    etiqueta, manejar_errores_bd, mostrar_error_bd, mostrar_mensaje, panel, preguntar, tarjeta_resumen, texto_vacio,
+    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla,
+    encabezado, escala, etiqueta, icono_px, manejar_errores_bd, mostrar_error_bd, mostrar_mensaje, panel, preguntar, px,
+    tarjeta_resumen, texto_vacio,
 )
 from dialogo_pago import pedir_pago
 from dialogo_recibo import mostrar_recibo
@@ -24,6 +26,13 @@ CLAVES_ORDEN = [
     lambda p: p["codigo_barras"] or "",
 ]
 
+# La tabla muestra como máximo estas filas, para que siga siendo ágil con
+# inventarios muy grandes; para ver otras se usa el buscador o los filtros
+MAX_FILAS = 300
+
+# Segundos que espera el buscador después de la última tecla antes de filtrar
+ESPERA_BUSQUEDA = 0.3
+
 
 class VistaInventario:
     def __init__(self, page, abrir_entrada):
@@ -35,6 +44,8 @@ class VistaInventario:
         # Columna por la que se ordena la tabla (None = orden de la base de datos)
         self.columna_ordenada = None
         self.orden_ascendente = True
+        # Cuenta las teclas del buscador, para filtrar solo cuando se deja de escribir
+        self.teclas_busqueda = 0
 
         tarjeta_productos, self.valor_productos = tarjeta_resumen(
             ft.Icons.INVENTORY_2_OUTLINED, "Productos", ft.Colors.INDIGO)
@@ -52,7 +63,7 @@ class VistaInventario:
                 encabezado(
                     "Inventario", "Gestiona tus productos y vende desde el carrito",
                     ft.FilledButton(
-                        "Nuevo producto", icon=ft.Icons.ADD, height=44,
+                        "Nuevo producto", icon=ft.Icons.ADD, height=px(44),
                         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12)),
                         on_click=lambda _: self.abrir_formulario(),
                     ),
@@ -69,31 +80,43 @@ class VistaInventario:
 
     def crear_panel_productos(self):
         self.campo_buscar = ft.TextField(
-            hint_text="Buscar por nombre o código…", prefix_icon=ft.Icons.SEARCH,
-            filled=True, dense=True, expand=True, on_change=lambda _: self.cargar_productos(),
+            hint_text="Buscar por nombre o código…", prefix_icon=icono_px(ft.Icons.SEARCH),
+            filled=True, dense=True, expand=True, on_change=self.al_escribir_busqueda,
         )
         self.menu_categoria = ft.Dropdown(
-            value="Todas", width=190, dense=True, filled=True, leading_icon=ft.Icons.CATEGORY_OUTLINED,
-            options=[ft.DropdownOption("Todas")], on_select=lambda _: self.cargar_productos(),
+            value="Todas", width=px(190), dense=True, filled=True, leading_icon=icono_px(ft.Icons.CATEGORY_OUTLINED),
+            options=[ft.DropdownOption("Todas")], on_select=lambda _: self.filtrar_tabla(),
         )
-        self.check_stock_bajo = ft.Checkbox(label="Solo stock bajo", on_change=lambda _: self.cargar_productos())
+        self.check_stock_bajo = ft.Checkbox(label="Solo stock bajo", on_change=lambda _: self.filtrar_tabla())
 
-        self.tabla = crear_tabla(
-            [("Producto", False), ("Categoría", False), ("Precio", True), ("Stock", True), ("Código", False),
-             ("", False)],
-            show_checkbox_column=False,
-        )
+        # Con letra muy grande no cabe todo: se oculta la columna del código (se sigue
+        # pudiendo buscar por código, y se ve al abrir el producto)
+        self.mostrar_codigo = escala() < 1.5
+        columnas = [("Producto", False), ("Categoría", False), ("Precio", True), ("Stock", True)]
+        if self.mostrar_codigo:
+            columnas.append(("Código", False))
+        self.tabla = crear_tabla(columnas + [("", False)], show_checkbox_column=False)
         # Clic en un encabezado: la primera vez ordena de menor a mayor; otro clic invierte el orden
         for columna in self.tabla.columns[:-1]:
             columna.on_sort = self.ordenar_por_columna
 
         self.sin_productos = texto_vacio(ft.Icons.SEARCH_OFF, "No hay productos que coincidan")
+        self.aviso_limite = ft.Text("", size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
+        if escala() > 1:
+            # Con letra grande no caben en una línea: el buscador va arriba, a lo ancho
+            filtros = ft.Column([
+                ft.Row([self.campo_buscar]),
+                ft.Row([self.menu_categoria, self.check_stock_bajo], spacing=12),
+            ], spacing=10)
+        else:
+            filtros = ft.Row([self.campo_buscar, self.menu_categoria, self.check_stock_bajo], spacing=12)
         return panel(
             ft.Column(
                 spacing=16,
                 controls=[
-                    ft.Row([self.campo_buscar, self.menu_categoria, self.check_stock_bajo], spacing=12),
+                    filtros,
                     ft.Stack([con_desplazamiento(self.tabla), self.sin_productos], expand=True),
+                    self.aviso_limite,
                 ],
             ),
             expand=True,
@@ -102,30 +125,31 @@ class VistaInventario:
     def crear_panel_carrito(self):
         # Venta con lector de códigos de barras: cada escaneo suma 1 unidad al carrito
         self.campo_escanear = ft.TextField(
-            hint_text="Escanear código de barras", prefix_icon=ft.Icons.QR_CODE_SCANNER,
+            hint_text="Escanear código de barras", prefix_icon=icono_px(ft.Icons.QR_CODE_SCANNER),
             filled=True, autofocus=True, on_submit=self.escanear_codigo,
         )
-        self.texto_escaneo = ft.Text("", size=13, color=COLOR_EXITO, visible=False)
+        self.texto_escaneo = ft.Text("", size=px(13), color=COLOR_EXITO, visible=False)
         self.lista_carrito = ft.ListView(spacing=8, expand=True)
         self.carrito_vacio = texto_vacio(ft.Icons.SHOPPING_CART_OUTLINED, "Escanea o agrega productos\ndesde la tabla")
-        self.texto_total = ft.Text("$0", size=30, weight=ft.FontWeight.BOLD)
+        self.texto_total = ft.Text("$0", size=px(30), weight=ft.FontWeight.BOLD)
         self.texto_unidades = ft.Text("", color=ft.Colors.ON_SURFACE_VARIANT)
         self.boton_cobrar = ft.FilledButton(
-            "Cobrar venta", icon=ft.Icons.POINT_OF_SALE, height=52, expand=True,
+            "Cobrar venta", icon=ft.Icons.POINT_OF_SALE, height=px(52), expand=True,
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=14), bgcolor=COLOR_EXITO, color=ft.Colors.WHITE,
-                text_style=ft.TextStyle(size=16, weight=ft.FontWeight.BOLD),
+                text_style=ft.TextStyle(size=px(16), weight=ft.FontWeight.BOLD),
             ),
             on_click=self.cobrar_carrito,
         )
         return panel(
             ft.Column(
                 spacing=12,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[
                     ft.Row(
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                         controls=[
-                            ft.Text("Carrito", size=20, weight=ft.FontWeight.BOLD),
+                            ft.Text("Carrito", size=px(20), weight=ft.FontWeight.BOLD),
                             ft.TextButton("Vaciar", icon=ft.Icons.DELETE_SWEEP_OUTLINED, on_click=self.vaciar_carrito),
                         ],
                     ),
@@ -141,7 +165,7 @@ class VistaInventario:
                     ft.Row([self.boton_cobrar]),
                 ],
             ),
-            width=380,
+            width=px(380),
         )
 
     # --- CARGA DE DATOS ---
@@ -154,34 +178,55 @@ class VistaInventario:
 
     @manejar_errores_bd
     def cargar_productos(self):
-        """Recarga la tabla respetando la búsqueda, la categoría, el filtro de stock bajo y el orden."""
+        """Recarga todo después de un cambio en los productos: categorías, tarjetas de resumen y tabla."""
         self.actualizar_menu_categorias()
+        self.actualizar_resumen()
+        self.filtrar_tabla()
+
+    async def al_escribir_busqueda(self, _e):
+        """Filtra cuando se deja de escribir, no con cada tecla."""
+        self.teclas_busqueda += 1
+        tecla = self.teclas_busqueda
+        await asyncio.sleep(ESPERA_BUSQUEDA)
+        if tecla == self.teclas_busqueda:
+            self.filtrar_tabla()
+
+    @manejar_errores_bd
+    def filtrar_tabla(self):
+        """Recarga solo la tabla, respetando la búsqueda, la categoría, el filtro de stock bajo y el orden."""
         categoria = self.menu_categoria.value
         productos = db.buscar_productos(
             texto=self.campo_buscar.value.strip(),
             categoria=None if categoria == "Todas" else categoria,
             stock_menor_a=STOCK_BAJO if self.check_stock_bajo.value else None,
         )
-        self.actualizar_resumen()
 
         if self.columna_ordenada is not None:
             productos = sorted(productos, key=CLAVES_ORDEN[self.columna_ordenada], reverse=not self.orden_ascendente)
 
-        self.tabla.rows = [self.fila_producto(p) for p in productos]
+        self.tabla.rows = [self.fila_producto(p) for p in productos[:MAX_FILAS]]
         self.sin_productos.visible = not productos
+        self.aviso_limite.visible = len(productos) > MAX_FILAS
+        self.aviso_limite.value = (
+            f"Se muestran {formatear_numero(MAX_FILAS)} de {formatear_numero(len(productos))} productos. "
+            "Usa el buscador o los filtros para encontrar los demás."
+        )
         self.page.update()
 
     def fila_producto(self, p):
         bajo = p["stock"] < STOCK_BAJO
+        celdas = [
+            ft.DataCell(ft.Text(p["nombre"], weight=ft.FontWeight.W_500)),
+            ft.DataCell(ft.Text(p["categoria"], color=ft.Colors.ON_SURFACE_VARIANT)),
+            ft.DataCell(ft.Text(formatear_precio(p["precio"]))),
+            ft.DataCell(etiqueta(formatear_numero(p["stock"]), COLOR_PELIGRO if bajo else COLOR_EXITO)),
+        ]
+        if self.mostrar_codigo:
+            celdas.append(ft.DataCell(ft.Text(p["codigo_barras"] or "—", color=ft.Colors.ON_SURFACE_VARIANT, size=px(13))))
         return ft.DataRow(
             # Clic en la fila: abrir el producto para editarlo
             on_select_change=lambda _, id_p=p["id"]: self.abrir_formulario(id_p),
-            cells=[
-                ft.DataCell(ft.Text(p["nombre"], weight=ft.FontWeight.W_500)),
-                ft.DataCell(ft.Text(p["categoria"], color=ft.Colors.ON_SURFACE_VARIANT)),
-                ft.DataCell(ft.Text(formatear_precio(p["precio"]))),
-                ft.DataCell(etiqueta(formatear_numero(p["stock"]), COLOR_PELIGRO if bajo else COLOR_EXITO)),
-                ft.DataCell(ft.Text(p["codigo_barras"] or "—", color=ft.Colors.ON_SURFACE_VARIANT, size=13)),
+            cells=celdas + [
                 ft.DataCell(ft.Row(
                     spacing=0,
                     controls=[
@@ -229,7 +274,7 @@ class VistaInventario:
         # Muestra la flecha en el encabezado ordenado
         self.tabla.sort_column_index = indice
         self.tabla.sort_ascending = self.orden_ascendente
-        self.cargar_productos()
+        self.filtrar_tabla()
 
     # --- FORMULARIO DE PRODUCTO ---
 
@@ -246,7 +291,7 @@ class VistaInventario:
                 return
 
         def campo(etiqueta_campo, valor, icono, **opciones):
-            return ft.TextField(label=etiqueta_campo, value=valor, prefix_icon=icono, **opciones)
+            return ft.TextField(label=etiqueta_campo, value=valor, prefix_icon=icono_px(icono), **opciones)
 
         # El código no guarda con Enter: el lector escribe el código y "presiona" Enter,
         # y eso guardaría el producto antes de terminar de llenar el formulario
@@ -369,7 +414,7 @@ class VistaInventario:
         self.page.show_dialog(ft.AlertDialog(
             title=ft.Text("Editar producto" if producto else "Nuevo producto"),
             content=ft.Column(
-                tight=True, spacing=14, width=460,
+                tight=True, spacing=14, width=px(460), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
                 controls=[campo_nombre, campo_codigo, campo_categoria, ft.Row([campo_precio, campo_stock])],
             ),
             actions=acciones,
@@ -472,7 +517,7 @@ class VistaInventario:
 
     def linea_carrito(self, id_producto, linea):
         campo_cantidad = ft.TextField(
-            value=formatear_numero(linea["cantidad"]), width=58, dense=True, text_align=ft.TextAlign.CENTER,
+            value=formatear_numero(linea["cantidad"]), width=px(58), dense=True, text_align=ft.TextAlign.CENTER,
             content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
         )
         campo_cantidad.on_submit = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)
@@ -492,16 +537,16 @@ class VistaInventario:
                             ft.Text(
                                 f"{formatear_precio(linea['precio'])} c/u · "
                                 f"{formatear_precio(linea['precio'] * linea['cantidad'])}",
-                                size=12, color=ft.Colors.ON_SURFACE_VARIANT,
+                                size=px(12), color=ft.Colors.ON_SURFACE_VARIANT,
                             ),
                         ],
                     ),
-                    ft.IconButton(ft.Icons.REMOVE, icon_size=18, tooltip="Quitar 1",
+                    ft.IconButton(ft.Icons.REMOVE, icon_size=px(18), tooltip="Quitar 1",
                                   on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] - 1)),
                     campo_cantidad,
-                    ft.IconButton(ft.Icons.ADD, icon_size=18, tooltip="Agregar 1",
+                    ft.IconButton(ft.Icons.ADD, icon_size=px(18), tooltip="Agregar 1",
                                   on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] + 1)),
-                    ft.IconButton(ft.Icons.CLOSE, icon_size=18, tooltip="Quitar del carrito",
+                    ft.IconButton(ft.Icons.CLOSE, icon_size=px(18), tooltip="Quitar del carrito",
                                   on_click=lambda _: self.cambiar_cantidad(id_producto, 0)),
                 ],
             ),

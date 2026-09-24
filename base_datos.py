@@ -574,6 +574,7 @@ def anular_ventas(ids_venta):
 
                 cursor.execute("UPDATE productos SET stock = stock + ? WHERE id = ?", (cantidad, producto_id))
                 cursor.execute("UPDATE ventas SET anulada = 1 WHERE id = ?", (id_venta,))
+                _registrar_movimiento(cursor, producto_id, nombre_producto, cantidad, "Anulación de venta")
                 total_devuelto += total
 
         cantidad_lineas = len(ids_venta)
@@ -623,8 +624,8 @@ def registrar_entrada(id_producto, cantidad):
 
 def obtener_entradas():
     """
-    Retorna los movimientos de stock (entradas, stock inicial y ajustes
-    manuales) como (id, nombre_producto, cantidad, fecha, motivo), del más
+    Retorna los movimientos de stock (entradas, stock inicial, ajustes
+    manuales y anulaciones de ventas) como (id, nombre_producto, cantidad, fecha, motivo), del más
     reciente al más antiguo.
     """
     conexion = conectar()

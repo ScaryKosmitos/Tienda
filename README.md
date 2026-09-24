@@ -14,7 +14,7 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Filtros por categoría y por stock bajo; los productos con menos de 5 unidades se marcan en rojo.
 - Ordenar la tabla haciendo clic en los encabezados (▲ de menor a mayor, ▼ de mayor a menor), en
   orden alfabético español (las tildes no alteran el orden y la ñ va después de la n).
-- Entradas de mercancía y registro de todos los movimientos de stock (stock inicial, entradas y ajustes manuales).
+- Entradas de mercancía y registro de todos los movimientos de stock (stock inicial, entradas, ajustes manuales y anulaciones de ventas).
 
 **Ventas**
 - Venta híbrida: escaneando con un lector de códigos de barras (cada escaneo suma 1 unidad al
@@ -30,6 +30,11 @@ y guarda los datos en una base de datos SQLite (un solo archivo, sin necesidad d
 - Historial de ventas con filtros de fecha (hoy, esta semana, este mes o un rango).
 - Ranking de productos más vendidos del período, con el porcentaje de lo vendido.
 - Exportación a Excel (.xlsx) con tres hojas: ventas, más vendidos e inventario con su valor en stock.
+
+**Comodidad**
+- Tamaño de letra ajustable (Normal, Grande, Muy grande y Enorme) desde el botón **Tamaño de letra** (el ícono de las dos T) de la barra lateral
+  o con `Ctrl +` / `Ctrl −` (`Ctrl 0` vuelve a Normal). Se recuerda al volver a abrir la aplicación.
+- Modo claro y oscuro.
 
 **Seguridad de los datos**
 - Respaldo automático de la base de datos una vez al día, al abrir la aplicación.
@@ -86,6 +91,7 @@ La primera vez se crea automáticamente la base de datos `inventario.db`, vacía
 | Vender a mano | Pulsar el carrito de la fila del producto y ajustar la cantidad con **−** / **+** o escribiéndola en el carrito; luego **Cobrar venta**. |
 | Asignar un código de barras | Abrir el producto, escanear en el campo **Código de barras** y pulsar **Guardar**. Si se escanea al vender un código que no existe, el programa ofrece registrar el producto. |
 | Registrar mercancía que llegó | Pulsar la bandeja de la fila del producto, o ir a **Entradas** en la barra lateral y elegirlo. |
+| Agrandar o achicar la letra | Pulsar el ícono de las dos **T** en la barra lateral y elegir el tamaño, o usar `Ctrl +` y `Ctrl −`. |
 | Imprimir o guardar un recibo | En el recibo que aparece al cobrar, pulsar **Imprimir o guardar PDF** y luego Ctrl+P en el navegador. |
 | Ver un recibo anterior | En **Ventas** (barra lateral), pulsar el ícono de recibo de la venta. |
 | Anular ventas | En **Ventas**, marcar las casillas de las líneas y pulsar **Anular seleccionadas**. |
@@ -112,6 +118,7 @@ Tienda/
 ├── recibo.py            Armado del recibo (texto y página para imprimir)
 ├── exportar.py          Generación del reporte de Excel
 ├── respaldar.py         Copias de seguridad de la base de datos
+├── configuracion.py     Preferencias guardadas (tamaño de letra) en configuracion.json
 └── requirements.txt     Librerías necesarias
 ```
 
@@ -132,7 +139,7 @@ Por eso la lógica de datos puede usarse o probarse sin abrir ninguna ventana.
 - **ventas**: una línea por producto vendido, con cantidad, total, fecha, si fue anulada y el recibo
   al que pertenece. Guarda también el nombre del producto, para que el historial se entienda aunque
   luego cambie.
-- **entradas**: movimientos de stock (stock inicial, entradas de mercancía y ajustes manuales).
+- **entradas**: movimientos de stock (stock inicial, entradas de mercancía, ajustes manuales y anulaciones de ventas).
 
 Un producto que ya tiene ventas no se puede eliminar, para no dejar el historial incompleto.
 

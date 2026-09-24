@@ -8,7 +8,7 @@ from pathlib import Path
 import flet as ft
 
 import recibo as rec
-from componentes import mostrar_mensaje
+from componentes import mostrar_mensaje, px
 
 
 def mostrar_recibo(page, recibo):
@@ -32,7 +32,7 @@ def mostrar_recibo(page, recibo):
         border_radius=8,
         padding=ft.Padding.symmetric(horizontal=20, vertical=16),
         content=ft.Text(
-            rec.texto_recibo(recibo), font_family="monospace", size=14, color=ft.Colors.BLACK, selectable=True,
+            rec.texto_recibo(recibo), font_family="monospace", size=px(14), color=ft.Colors.BLACK, selectable=True,
         ),
     )
 

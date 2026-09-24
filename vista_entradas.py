@@ -6,8 +6,8 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, avisar, con_desplazamiento, crear_tabla, encabezado, etiqueta,
-    manejar_errores_bd, mostrar_mensaje, panel, texto_vacio,
+    COLOR_EXITO, COLOR_PELIGRO, avisar, con_desplazamiento, crear_tabla, encabezado, etiqueta, icono_px,
+    manejar_errores_bd, mostrar_mensaje, panel, px, texto_vacio,
 )
 from formato import clave_orden, formatear_cambio, formatear_numero, leer_entero
 
@@ -18,16 +18,16 @@ class VistaEntradas:
         self.id_producto = None
 
         self.menu_producto = ft.Dropdown(
-            label="Producto", leading_icon=ft.Icons.INVENTORY_2_OUTLINED, width=380, filled=True,
-            editable=True, enable_filter=True, menu_height=360, on_select=self.al_elegir_producto,
+            label="Producto", leading_icon=icono_px(ft.Icons.INVENTORY_2_OUTLINED), width=px(380), filled=True,
+            editable=True, enable_filter=True, menu_height=px(360), on_select=self.al_elegir_producto,
         )
         self.texto_stock = ft.Text("Elige el producto que llegó", color=ft.Colors.ON_SURFACE_VARIANT)
         self.campo_cantidad = ft.TextField(
-            label="Unidades recibidas", prefix_icon=ft.Icons.ADD_BOX_OUTLINED, width=200, filled=True,
+            label="Unidades recibidas", prefix_icon=icono_px(ft.Icons.ADD_BOX_OUTLINED), width=px(200), filled=True,
             disabled=True, on_submit=self.registrar,
         )
         self.boton_registrar = ft.FilledButton(
-            "Registrar entrada", icon=ft.Icons.MOVE_TO_INBOX, height=48, disabled=True, on_click=self.registrar,
+            "Registrar entrada", icon=ft.Icons.MOVE_TO_INBOX, height=px(48), disabled=True, on_click=self.registrar,
         )
 
         self.tabla = crear_tabla(
@@ -43,7 +43,7 @@ class VistaEntradas:
                 panel(ft.Column(
                     spacing=12,
                     controls=[
-                        ft.Text("Nueva entrada", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text("Nueva entrada", size=px(18), weight=ft.FontWeight.BOLD),
                         ft.Row(
                             [self.menu_producto, self.campo_cantidad, self.boton_registrar],
                             spacing=12, vertical_alignment=ft.CrossAxisAlignment.START, wrap=True,
@@ -55,8 +55,8 @@ class VistaEntradas:
                     ft.Column(
                         expand=True,
                         controls=[
-                            ft.Text("Movimientos de stock (entradas, stock inicial y ajustes manuales)",
-                                    size=18, weight=ft.FontWeight.BOLD),
+                            ft.Text("Movimientos de stock (entradas, stock inicial, ajustes manuales y anulaciones)",
+                                    size=px(18), weight=ft.FontWeight.BOLD),
                             ft.Stack([con_desplazamiento(self.tabla), self.sin_movimientos], expand=True),
                         ],
                     ),
@@ -101,7 +101,7 @@ class VistaEntradas:
             ft.DataRow(cells=[
                 ft.DataCell(ft.Text(nombre, weight=ft.FontWeight.W_500)),
                 ft.DataCell(etiqueta(formatear_cambio(cantidad), COLOR_EXITO if cantidad > 0 else COLOR_PELIGRO)),
-                ft.DataCell(ft.Text(fecha, color=ft.Colors.ON_SURFACE_VARIANT, size=13)),
+                ft.DataCell(ft.Text(fecha, color=ft.Colors.ON_SURFACE_VARIANT, size=px(13))),
                 ft.DataCell(ft.Text(motivo)),
             ])
             for _id, nombre, cantidad, fecha, motivo in movimientos

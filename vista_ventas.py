@@ -11,7 +11,7 @@ import flet as ft
 import base_datos as db
 from componentes import (
     COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, STOCK_BAJO, avisar, con_desplazamiento, crear_tabla, encabezado,
-    etiqueta, manejar_errores_bd, mostrar_mensaje, panel, preguntar, texto_vacio,
+    etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, texto_vacio,
 )
 from dialogo_recibo import mostrar_recibo
 from formato import describir_periodo, formatear_numero, formatear_precio
@@ -42,7 +42,7 @@ class VistaVentas:
                 encabezado(
                     "Ventas", "Historial de ventas, recibos y productos más vendidos",
                     ft.FilledButton(
-                        "Exportar a Excel", icon=ft.Icons.TABLE_VIEW_OUTLINED, height=44,
+                        "Exportar a Excel", icon=ft.Icons.TABLE_VIEW_OUTLINED, height=px(44),
                         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), bgcolor=COLOR_EXITO,
                                              color=ft.Colors.WHITE),
                         on_click=self.exportar_a_excel,
@@ -58,8 +58,8 @@ class VistaVentas:
                             expand=True,
                             controls=[
                                 ft.TabBar(tabs=[
-                                    ft.Tab(label="Historial", icon=ft.Icons.RECEIPT_LONG_OUTLINED),
-                                    ft.Tab(label="Más vendidos", icon=ft.Icons.EMOJI_EVENTS_OUTLINED),
+                                    ft.Tab(label="Historial", icon=icono_px(ft.Icons.RECEIPT_LONG_OUTLINED, 24)),
+                                    ft.Tab(label="Más vendidos", icon=icono_px(ft.Icons.EMOJI_EVENTS_OUTLINED, 24)),
                                 ]),
                                 ft.TabBarView(
                                     expand=True,
@@ -77,7 +77,7 @@ class VistaVentas:
 
     def campo_fecha(self, etiqueta_campo):
         campo = ft.TextField(
-            label=etiqueta_campo, hint_text="AAAA-MM-DD", width=170, dense=True, filled=True,
+            label=etiqueta_campo, hint_text="AAAA-MM-DD", width=px(170), dense=True, filled=True,
             on_submit=lambda _: self.cargar(),
         )
 
@@ -96,7 +96,7 @@ class VistaVentas:
                 on_change=al_elegir,
             ))
 
-        campo.suffix = ft.IconButton(ft.Icons.CALENDAR_MONTH_OUTLINED, icon_size=18, tooltip="Elegir en el calendario",
+        campo.suffix_icon = ft.IconButton(ft.Icons.CALENDAR_MONTH_OUTLINED, icon_size=px(20), tooltip="Elegir en el calendario",
                                      on_click=elegir_fecha)
         return campo
 
@@ -133,7 +133,7 @@ class VistaVentas:
             show_checkbox_column=True,
         )
         self.sin_ventas = texto_vacio(ft.Icons.RECEIPT_LONG_OUTLINED, "No hay ventas en este período")
-        self.texto_total = ft.Text("", size=17, weight=ft.FontWeight.BOLD, color=COLOR_EXITO)
+        self.texto_total = ft.Text("", size=px(17), weight=ft.FontWeight.BOLD, color=COLOR_EXITO)
         return ft.Column(
             expand=True,
             controls=[
@@ -151,7 +151,7 @@ class VistaVentas:
              ("% de lo vendido", True)],
         )
         self.sin_ranking = texto_vacio(ft.Icons.EMOJI_EVENTS_OUTLINED, "No hay ventas en este período")
-        self.texto_ranking = ft.Text("", size=15, weight=ft.FontWeight.BOLD)
+        self.texto_ranking = ft.Text("", size=px(15), weight=ft.FontWeight.BOLD)
         return ft.Column(
             expand=True,
             controls=[ft.Stack([con_desplazamiento(self.tabla_ranking), self.sin_ranking], expand=True),
@@ -236,7 +236,7 @@ class VistaVentas:
                 ft.DataCell(ft.Text(venta["nombre_producto"], weight=ft.FontWeight.W_500, color=gris)),
                 ft.DataCell(ft.Text(formatear_numero(venta["cantidad"]), color=gris)),
                 ft.DataCell(ft.Text(formatear_precio(venta["total"]), color=gris)),
-                ft.DataCell(ft.Text(venta["fecha"], color=gris or ft.Colors.ON_SURFACE_VARIANT, size=13)),
+                ft.DataCell(ft.Text(venta["fecha"], color=gris or ft.Colors.ON_SURFACE_VARIANT, size=px(13))),
                 ft.DataCell(etiqueta("Anulada", ft.Colors.OUTLINE) if anulada else etiqueta("OK", COLOR_EXITO)),
                 ft.DataCell(ft.IconButton(
                     ft.Icons.RECEIPT_OUTLINED, tooltip="Ver recibo",
@@ -269,7 +269,7 @@ class VistaVentas:
             porcentaje = f"{fila['total'] / total_ranking * 100:.1f} %".replace(".", ",") if total_ranking else "—"
             medalla = {1: ft.Colors.AMBER, 2: ft.Colors.BLUE_GREY_300, 3: ft.Colors.BROWN_300}.get(puesto)
             filas.append(ft.DataRow(cells=[
-                ft.DataCell(ft.Icon(ft.Icons.EMOJI_EVENTS, color=medalla, size=20) if medalla else ft.Text(str(puesto))),
+                ft.DataCell(ft.Icon(ft.Icons.EMOJI_EVENTS, color=medalla, size=px(20)) if medalla else ft.Text(str(puesto))),
                 ft.DataCell(ft.Text(fila["nombre"], weight=ft.FontWeight.W_500)),
                 ft.DataCell(ft.Text(formatear_numero(fila["unidades"]))),
                 ft.DataCell(ft.Text(formatear_precio(fila["total"]))),

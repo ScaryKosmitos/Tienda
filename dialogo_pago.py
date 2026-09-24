@@ -5,7 +5,7 @@ import asyncio
 
 import flet as ft
 
-from componentes import COLOR_EXITO, COLOR_PELIGRO
+from componentes import COLOR_EXITO, COLOR_PELIGRO, icono_px, px
 from formato import formatear_numero, formatear_precio, leer_precio
 
 
@@ -29,7 +29,7 @@ async def pedir_pago(page, total):
         except ValueError:
             return None
 
-    texto_cambio = ft.Text("Cambio: —", size=20, weight=ft.FontWeight.BOLD)
+    texto_cambio = ft.Text("Cambio: —", size=px(20), weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
 
     def actualizar_cambio(_=None):
         campo_pago.error_text = None
@@ -59,7 +59,7 @@ async def pedir_pago(page, total):
         confirmar()
 
     campo_pago = ft.TextField(
-        label="Paga con ($)", prefix_icon=ft.Icons.PAYMENTS_OUTLINED, text_size=20,
+        label="Paga con ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
         text_align=ft.TextAlign.CENTER, autofocus=True,
         on_change=actualizar_cambio, on_submit=confirmar,
     )
@@ -67,10 +67,10 @@ async def pedir_pago(page, total):
     page.show_dialog(ft.AlertDialog(
         title=ft.Text("Cobrar venta"),
         content=ft.Column(
-            tight=True, spacing=14, width=360, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            tight=True, spacing=14, width=px(360), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             controls=[
-                ft.Text("Total a cobrar", color=ft.Colors.ON_SURFACE_VARIANT),
-                ft.Text(formatear_precio(total), size=34, weight=ft.FontWeight.BOLD),
+                ft.Text("Total a cobrar", color=ft.Colors.ON_SURFACE_VARIANT, text_align=ft.TextAlign.CENTER),
+                ft.Text(formatear_precio(total), size=px(34), weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER),
                 campo_pago,
                 texto_cambio,
             ],

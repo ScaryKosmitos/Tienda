@@ -5,8 +5,11 @@ Ventana principal: barra lateral de navegación y las tres pantallas
 import flet as ft
 
 import base_datos as db
+import configuracion
 import respaldar
-from componentes import COLOR_MARCA, avisar, mostrar_mensaje, preguntar
+from componentes import (
+    COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, icono_px, mostrar_mensaje, poner_escala, preguntar, px,
+)
 from vista_entradas import VistaEntradas
 from vista_inventario import VistaInventario
 from vista_ventas import VistaVentas
@@ -18,8 +21,6 @@ class Aplicacion:
     def __init__(self, page):
         self.page = page
         page.title = "Tienda"
-        page.theme = ft.Theme(color_scheme_seed=COLOR_MARCA)
-        page.dark_theme = ft.Theme(color_scheme_seed=COLOR_MARCA)
         page.theme_mode = ft.ThemeMode.SYSTEM
         # Calendario y textos del sistema en español
         page.locale_configuration = ft.LocaleConfiguration(
@@ -30,9 +31,26 @@ class Aplicacion:
         page.window.height = 820
         page.window.min_width = 1100
         page.window.min_height = 680
+        # Abre ocupando toda la pantalla: hay más espacio, sobre todo con letra grande
+        page.window.maximized = True
         # Se pregunta antes de cerrar si hay un carrito sin cobrar
         page.window.prevent_close = True
         page.window.on_event = self.al_evento_ventana
+        # Ctrl + y Ctrl - cambian el tamaño de letra
+        page.on_keyboard_event = self.al_presionar_tecla
+
+        # El tamaño de letra elegido la última vez
+        guardada = configuracion.leer().get("escala", 1.0)
+        poner_escala(guardada if any(guardada == valor for _, valor in TAMANOS) else 1.0)
+
+        self.construir()
+        self.ir_a(INVENTARIO)
+
+    def construir(self):
+        """Arma el tema, las pantallas y la barra lateral con el tamaño de letra actual."""
+        page = self.page
+        page.theme = crear_tema()
+        page.dark_theme = crear_tema()
 
         self.inventario = VistaInventario(page, abrir_entrada=self.abrir_entrada)
         self.ventas = VistaVentas(page)
@@ -42,7 +60,7 @@ class Aplicacion:
         self.navegacion = ft.NavigationRail(
             selected_index=INVENTARIO,
             label_type=ft.NavigationRailLabelType.ALL,
-            min_width=96,
+            min_width=px(96),
             group_alignment=-0.85,
             leading=ft.Container(
                 padding=ft.Padding.only(top=16, bottom=24),
@@ -51,7 +69,7 @@ class Aplicacion:
                     spacing=4,
                     controls=[
                         ft.Container(
-                            content=ft.Icon(ft.Icons.STOREFRONT, color=ft.Colors.WHITE, size=26),
+                            content=ft.Icon(ft.Icons.STOREFRONT, color=ft.Colors.WHITE, size=px(26)),
                             bgcolor=COLOR_MARCA, border_radius=14, padding=10,
                         ),
                         ft.Text("Tienda", weight=ft.FontWeight.BOLD),
@@ -60,25 +78,82 @@ class Aplicacion:
             ),
             trailing=ft.Container(
                 padding=ft.Padding.only(top=24),
-                content=ft.IconButton(ft.Icons.DARK_MODE_OUTLINED, tooltip="Cambiar entre modo claro y oscuro",
+                content=ft.Column(
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        self.crear_menu_tamano(),
+                        ft.IconButton(ft.Icons.DARK_MODE_OUTLINED, tooltip="Cambiar entre modo claro y oscuro",
                                       on_click=self.cambiar_tema),
+                    ],
+                ),
             ),
             destinations=[
                 ft.NavigationRailDestination(
-                    icon=ft.Icons.POINT_OF_SALE_OUTLINED, selected_icon=ft.Icons.POINT_OF_SALE, label="Inventario"),
+                    icon=icono_px(ft.Icons.POINT_OF_SALE_OUTLINED, 24), selected_icon=icono_px(ft.Icons.POINT_OF_SALE, 24),
+                    label="Inventario"),
                 ft.NavigationRailDestination(
-                    icon=ft.Icons.RECEIPT_LONG_OUTLINED, selected_icon=ft.Icons.RECEIPT_LONG, label="Ventas"),
+                    icon=icono_px(ft.Icons.RECEIPT_LONG_OUTLINED, 24), selected_icon=icono_px(ft.Icons.RECEIPT_LONG, 24),
+                    label="Ventas"),
                 ft.NavigationRailDestination(
-                    icon=ft.Icons.MOVE_TO_INBOX_OUTLINED, selected_icon=ft.Icons.MOVE_TO_INBOX, label="Entradas"),
+                    icon=icono_px(ft.Icons.MOVE_TO_INBOX_OUTLINED, 24), selected_icon=icono_px(ft.Icons.MOVE_TO_INBOX, 24),
+                    label="Entradas"),
             ],
             on_change=lambda e: self.ir_a(e.control.selected_index),
         )
         self.contenido = ft.Container(expand=True, padding=24)
 
+        page.controls.clear()
         page.add(ft.Row(
             [self.navegacion, ft.VerticalDivider(width=1), self.contenido], expand=True, spacing=0,
         ))
-        self.ir_a(INVENTARIO)
+
+    def crear_menu_tamano(self):
+        """Botón "Aa" con las opciones de tamaño de letra; la elegida lleva una marca."""
+        return ft.PopupMenuButton(
+            icon=ft.Icons.FORMAT_SIZE,
+            tooltip="Tamaño de letra (Ctrl + y Ctrl −)",
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Text(f"{nombre} ({round(valor * 100)} %)"),
+                    checked=valor == escala(),
+                    on_click=lambda _, v=valor: self.cambiar_tamano(v),
+                )
+                for nombre, valor in TAMANOS
+            ],
+        )
+
+    def cambiar_tamano(self, valor):
+        """Vuelve a armar todas las pantallas con el nuevo tamaño, conservando el carrito."""
+        if valor == escala():
+            return
+        poner_escala(valor)
+        try:
+            configuracion.guardar(escala=valor)
+        except OSError:
+            # Si no se puede guardar, el tamaño igual cambia; solo no se recordará
+            pass
+
+        indice = self.navegacion.selected_index
+        carrito = self.inventario.carrito
+        # Cada vez que se arma la pantalla de ventas agrega su selector de archivos
+        self.page.services.remove(self.ventas.selector_archivo)
+        self.construir()
+        self.inventario.carrito = carrito
+        self.ir_a(indice)
+        nombre = next(n for n, v in TAMANOS if v == valor)
+        avisar(self.page, f"Tamaño de letra: {nombre}")
+
+    def al_presionar_tecla(self, e):
+        if not e.ctrl:
+            return
+        valores = [valor for _, valor in TAMANOS]
+        posicion = valores.index(escala())
+        if e.key in ("=", "+", "Numpad Add"):
+            self.cambiar_tamano(valores[min(posicion + 1, len(valores) - 1)])
+        elif e.key in ("-", "Numpad Subtract"):
+            self.cambiar_tamano(valores[max(posicion - 1, 0)])
+        elif e.key in ("0", "Numpad 0"):
+            self.cambiar_tamano(1.0)
 
     def ir_a(self, indice, **opciones):
         """Muestra una pantalla y recarga sus datos, por si otra pantalla los cambió."""
