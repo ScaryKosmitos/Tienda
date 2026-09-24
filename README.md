@@ -69,8 +69,11 @@ Para vender escaneando sirve cualquier lector de códigos de barras USB que func
 Desde ahí la tienda se abre con ese ícono. Si alguna vez no abre, el error queda anotado en
 `errores.log`, dentro de la carpeta de la tienda.
 
-Para **actualizar** la tienda, reemplazar los archivos del programa por los nuevos (sin borrar
-`inventario.db` ni las carpetas `respaldos` y `recibos`) y volver a ejecutar `instalar_windows.bat`.
+Para **actualizar** la tienda a la última versión publicada en GitHub: cerrar la tienda y abrir
+**Actualizar Tienda** en el menú Inicio (o doble clic en `actualizar_windows.bat`). Antes de cambiar
+nada hace un respaldo de la base de datos, y nunca toca los datos: `inventario.db`, `respaldos`,
+`recibos`, `configuracion.json` y `errores.log`. Sin internet, se puede actualizar desde un ZIP
+(por ejemplo, en una USB) con `py actualizar.py ruta\del\archivo.zip`.
 
 ### En Linux (o para desarrollar)
 
@@ -139,6 +142,8 @@ Tienda/
 ├── configuracion.py     Preferencias guardadas (tamaño de letra) en configuracion.json
 ├── instalar.py          Instalador: entorno de Python, librerías y accesos directos de Windows
 ├── instalar_windows.bat Doble clic para instalar en Windows (ejecuta instalar.py)
+├── actualizar.py        Actualizador: descarga la última versión de GitHub sin tocar los datos
+├── actualizar_windows.bat Doble clic para actualizar en Windows (ejecuta actualizar.py)
 ├── tienda.ico           Ícono de la aplicación
 └── requirements.txt     Librerías necesarias
 ```

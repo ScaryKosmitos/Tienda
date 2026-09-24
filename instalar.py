@@ -27,15 +27,26 @@ else:
 # para no tener problemas con espacios o tildes en las rutas
 _CREAR_ACCESO = r"""
 $carpeta = [Environment]::GetFolderPath($env:TIENDA_UBICACION)
-$acceso = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $carpeta 'Tienda.lnk'))
+$ruta = Join-Path $carpeta ($env:TIENDA_NOMBRE + '.lnk')
+$acceso = (New-Object -ComObject WScript.Shell).CreateShortcut($ruta)
 $acceso.TargetPath = $env:TIENDA_PROGRAMA
-$acceso.Arguments = '"' + $env:TIENDA_SCRIPT + '"'
+$acceso.Arguments = $env:TIENDA_ARGUMENTOS
 $acceso.WorkingDirectory = $env:TIENDA_CARPETA
 $acceso.IconLocation = $env:TIENDA_ICONO + ',0'
-$acceso.Description = 'Inventario y punto de venta'
+$acceso.Description = $env:TIENDA_DESCRIPCION
 $acceso.Save()
-Write-Output (Join-Path $carpeta 'Tienda.lnk')
+Write-Output $ruta
 """
+
+# Accesos directos: nombre, programa, argumentos, descripción y dónde se crean
+# ("Desktop" = Escritorio, "Programs" = menú Inicio). El de actualizar va solo
+# en el menú Inicio, para no pulsarlo por accidente
+ACCESOS = [
+    ("Tienda", PYTHONW_VENV, f'"{os.path.join(CARPETA, "main.py")}"', "Inventario y punto de venta",
+     ("Desktop", "Programs")),
+    ("Actualizar Tienda", os.path.join(CARPETA, "actualizar_windows.bat"), "",
+     "Descarga la última versión de la tienda sin tocar los datos", ("Programs",)),
+]
 
 
 def paso(texto):
@@ -74,20 +85,20 @@ def crear_accesos_directos():
     if not ES_WINDOWS:
         paso("Accesos directos: solo se crean en Windows. En Linux se abre con: .venv/bin/python main.py")
         return
-    paso("Creando los accesos directos 'Tienda'")
-    datos = {
-        "TIENDA_PROGRAMA": PYTHONW_VENV,
-        "TIENDA_SCRIPT": os.path.join(CARPETA, "main.py"),
-        "TIENDA_CARPETA": CARPETA,
-        "TIENDA_ICONO": os.path.join(CARPETA, "tienda.ico"),
-    }
-    for ubicacion in ("Desktop", "Programs"):  # Escritorio y menú Inicio
-        resultado = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", _CREAR_ACCESO],
-            env={**os.environ, **datos, "TIENDA_UBICACION": ubicacion},
-        )
-        if resultado.returncode != 0:
-            raise SystemExit(f"\nERROR: no se pudo crear el acceso directo ({ubicacion}).")
+    paso("Creando los accesos directos")
+    for nombre, programa, argumentos, descripcion, ubicaciones in ACCESOS:
+        datos = {
+            "TIENDA_NOMBRE": nombre, "TIENDA_PROGRAMA": programa, "TIENDA_ARGUMENTOS": argumentos,
+            "TIENDA_DESCRIPCION": descripcion, "TIENDA_CARPETA": CARPETA,
+            "TIENDA_ICONO": os.path.join(CARPETA, "tienda.ico"),
+        }
+        for ubicacion in ubicaciones:
+            resultado = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", _CREAR_ACCESO],
+                env={**os.environ, **datos, "TIENDA_UBICACION": ubicacion},
+            )
+            if resultado.returncode != 0:
+                raise SystemExit(f"\nERROR: no se pudo crear el acceso directo '{nombre}' ({ubicacion}).")
 
 
 def main():
@@ -100,6 +111,8 @@ def main():
     descargar_visor()
     crear_accesos_directos()
     print("\nListo. La tienda se abre con el ícono 'Tienda' del Escritorio o del menú Inicio.")
+    if ES_WINDOWS:
+        print("Para actualizarla más adelante: menú Inicio -> 'Actualizar Tienda'.")
 
 
 if __name__ == "__main__":
