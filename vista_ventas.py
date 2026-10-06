@@ -47,7 +47,8 @@ class VistaVentas:
             "Anular seleccionadas", icon=ft.Icons.UNDO, disabled=True,
             # Pastilla roja suave, como las del stock; más tenue mientras no hay nada seleccionado
             style=ft.ButtonStyle(
-                color=COLOR_PELIGRO, shape=ft.StadiumBorder(), padding=ft.Padding.symmetric(horizontal=18, vertical=12),
+                color=COLOR_PELIGRO, shape=ft.StadiumBorder(), padding=ft.Padding.symmetric(horizontal=24, vertical=18),
+                text_style=ft.TextStyle(size=px(16), weight=ft.FontWeight.W_600), icon_size=px(22),
                 bgcolor={ft.ControlState.DISABLED: ft.Colors.with_opacity(0.05, COLOR_PELIGRO),
                          ft.ControlState.DEFAULT: ft.Colors.with_opacity(0.12, COLOR_PELIGRO)},
                 side=ft.BorderSide(1, ft.Colors.with_opacity(0.3, COLOR_PELIGRO)),
