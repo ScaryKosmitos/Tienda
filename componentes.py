@@ -23,13 +23,13 @@ COLOR_PELIGRO = ft.Colors.RED
 
 # Estilo neumórfico: todo comparte el mismo fondo y los recuadros parecen
 # salir de él (o hundirse en él) gracias a dos sombras, una clara arriba a la
-# izquierda y una oscura abajo a la derecha. Colores de cada modo:
-# fondo, recuadros hundidos, luz, sombra y el velo que cubre la tienda al
-# abrir una ventana
+# izquierda y una oscura abajo a la derecha. Colores de cada modo: fondo,
+# recuadros hundidos, el borde de los botones incrustados, luz, sombra y el
+# velo que cubre la tienda al abrir una ventana
 _NEUMORFISMO = {
-    False: dict(fondo="#E4E9F0", hundido="#D9DFE8", luz="#FFFFFF", sombra="#A9B4C6",
+    False: dict(fondo="#E4E9F0", hundido="#D9DFE8", borde_hundido="#BCC6D4", luz="#FFFFFF", sombra="#A9B4C6",
                 velo=ft.Colors.with_opacity(0.45, "#A9B4C6")),
-    True: dict(fondo="#2A2D34", hundido="#23262C", luz="#3A3F49", sombra="#17191D",
+    True: dict(fondo="#2A2D34", hundido="#23262C", borde_hundido="#141619", luz="#3A3F49", sombra="#17191D",
                velo=ft.Colors.with_opacity(0.60, "#17191D")),
 }
 
@@ -78,10 +78,12 @@ def crear_tema(oscuro):
     # Los íconos de los botones miden 18 en Material Design
     forma = ft.RoundedRectangleBorder(radius=14)
     estilo_botones = ft.ButtonStyle(icon_size=px(18), shape=forma)
-    # Los botones con relieve: una sombra suave, como si salieran del fondo
-    estilo_relieve = ft.ButtonStyle(
-        icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
-        bgcolor=c["fondo"], side=ft.BorderSide(0, ft.Colors.TRANSPARENT),
+    # Los botones van incrustados en el fondo: sin sombra hacia afuera, con el
+    # color hundido y un borde oscuro que hace de sombra interior (Flet no tiene
+    # sombras hacia adentro)
+    estilo_incrustado = ft.ButtonStyle(
+        icon_size=px(18), shape=forma, elevation=0, bgcolor=c["hundido"],
+        side=ft.BorderSide(1.5, c["borde_hundido"]),
     )
     # Ventanas, menús y calendario: del color del fondo, con su sombra, sin borde
     def forma_suave(radio):
@@ -106,10 +108,12 @@ def crear_tema(oscuro):
             nombre: ft.TextStyle(size=px(t), color=ft.Colors.ON_SURFACE) for nombre, t in _TAMANOS_TEMA.items()
         }),
         icon_theme=ft.IconTheme(size=px(24)),
+        # Los botones de color también van incrustados: planos y con un borde más oscuro
         filled_button_theme=ft.FilledButtonTheme(style=ft.ButtonStyle(
-            icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
+            icon_size=px(18), shape=forma, elevation=0,
+            side=ft.BorderSide(1.5, ft.Colors.with_opacity(0.25, "#000000")),
         )),
-        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_relieve),
+        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_incrustado),
         text_button_theme=ft.TextButtonTheme(style=estilo_botones),
         dialog_theme=ft.DialogTheme(bgcolor=c["fondo"], barrier_color=c["velo"], shape=forma_suave(24),
                                     elevation=12, shadow_color=c["sombra"]),
