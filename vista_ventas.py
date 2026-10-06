@@ -45,7 +45,14 @@ class VistaVentas:
 
         self.boton_anular = ft.OutlinedButton(
             "Anular seleccionadas", icon=ft.Icons.UNDO, disabled=True,
-            style=ft.ButtonStyle(color=COLOR_PELIGRO), on_click=self.anular_seleccionadas,
+            # Pastilla roja suave, como las del stock; más tenue mientras no hay nada seleccionado
+            style=ft.ButtonStyle(
+                color=COLOR_PELIGRO, shape=ft.StadiumBorder(), padding=ft.Padding.symmetric(horizontal=18, vertical=12),
+                bgcolor={ft.ControlState.DISABLED: ft.Colors.with_opacity(0.05, COLOR_PELIGRO),
+                         ft.ControlState.DEFAULT: ft.Colors.with_opacity(0.12, COLOR_PELIGRO)},
+                side=ft.BorderSide(1, ft.Colors.with_opacity(0.3, COLOR_PELIGRO)),
+            ),
+            on_click=self.anular_seleccionadas,
         )
 
         self.control = ft.Column(
@@ -154,9 +161,18 @@ class VistaVentas:
             controls=[
                 ft.Stack([con_desplazamiento(self.tabla_ventas), self.sin_ventas], expand=True),
                 self.pie_ventas.control,
+                ft.Divider(height=1),
                 ft.Row(
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    controls=[self.texto_total, self.boton_anular],
+                    controls=[
+                        # Pastilla verde suave, como las del stock en Inventario
+                        ft.Container(
+                            self.texto_total, bgcolor=ft.Colors.with_opacity(0.12, COLOR_EXITO), border_radius=30,
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, COLOR_EXITO)),
+                            padding=ft.Padding.symmetric(horizontal=18, vertical=8),
+                        ),
+                        self.boton_anular,
+                    ],
                 ),
             ],
         )
