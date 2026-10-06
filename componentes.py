@@ -32,15 +32,15 @@ _VIDRIO = {
     False: dict(
         degradado=("#C9D6FF", "#E2C6F5", "#FBD3E9"), manchas=("#7F9CFF", "#F48FC0", "#6EDDD0"),
         vidrio=ft.Colors.with_opacity(0.35, "#FFFFFF"), borde=ft.Colors.with_opacity(0.65, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.45, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.78, "#F7F5FF"),
-        menu=ft.Colors.with_opacity(0.86, "#F7F5FF"), velo=ft.Colors.with_opacity(0.45, "#C9C2F0"),
+        campo=ft.Colors.with_opacity(0.45, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.93, "#F7F5FF"),
+        menu=ft.Colors.with_opacity(0.94, "#F7F5FF"), velo=ft.Colors.with_opacity(0.55, "#C9C2F0"),
         sombra=ft.Colors.with_opacity(0.18, "#1F2A5C"),
     ),
     True: dict(
         degradado=("#0F1028", "#1B1240", "#2A0F3A"), manchas=("#6366F1", "#D946EF", "#22D3EE"),
         vidrio=ft.Colors.with_opacity(0.07, "#FFFFFF"), borde=ft.Colors.with_opacity(0.20, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.10, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.80, "#2A2350"),
-        menu=ft.Colors.with_opacity(0.88, "#241E42"), velo=ft.Colors.with_opacity(0.60, "#0B0A1E"),
+        campo=ft.Colors.with_opacity(0.10, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.93, "#2A2350"),
+        menu=ft.Colors.with_opacity(0.94, "#241E42"), velo=ft.Colors.with_opacity(0.65, "#0B0A1E"),
         sombra=ft.Colors.with_opacity(0.35, "#000000"),
     ),
 }
