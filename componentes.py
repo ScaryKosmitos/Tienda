@@ -24,19 +24,23 @@ COLOR_PELIGRO = ft.Colors.RED
 # Estilo glassmorfismo: un fondo de colores degradados con manchas de luz, y
 # encima recuadros de "vidrio esmerilado": translúcidos, con el fondo borroso
 # detrás y un borde fino claro. Colores de cada modo: los tres del degradado,
-# las tres manchas, el vidrio, su borde, los campos de texto, lo sólido
-# (ventanas y menús, que deben leerse bien) y la sombra
+# las tres manchas, el vidrio, su borde, los campos de texto, las ventanas y
+# los menús (un vidrio más tupido, porque Flet no puede desenfocar lo que
+# queda detrás de ellos), el velo que cubre la tienda al abrir una ventana y
+# la sombra
 _VIDRIO = {
     False: dict(
         degradado=("#C9D6FF", "#E2C6F5", "#FBD3E9"), manchas=("#7F9CFF", "#F48FC0", "#6EDDD0"),
         vidrio=ft.Colors.with_opacity(0.35, "#FFFFFF"), borde=ft.Colors.with_opacity(0.65, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.45, "#FFFFFF"), solido="#F4F2FB",
+        campo=ft.Colors.with_opacity(0.45, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.78, "#F7F5FF"),
+        menu=ft.Colors.with_opacity(0.86, "#F7F5FF"), velo=ft.Colors.with_opacity(0.45, "#C9C2F0"),
         sombra=ft.Colors.with_opacity(0.18, "#1F2A5C"),
     ),
     True: dict(
         degradado=("#0F1028", "#1B1240", "#2A0F3A"), manchas=("#6366F1", "#D946EF", "#22D3EE"),
         vidrio=ft.Colors.with_opacity(0.07, "#FFFFFF"), borde=ft.Colors.with_opacity(0.20, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.10, "#FFFFFF"), solido="#221D3A",
+        campo=ft.Colors.with_opacity(0.10, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.80, "#2A2350"),
+        menu=ft.Colors.with_opacity(0.88, "#241E42"), velo=ft.Colors.with_opacity(0.60, "#0B0A1E"),
         sombra=ft.Colors.with_opacity(0.35, "#000000"),
     ),
 }
@@ -90,6 +94,9 @@ def crear_tema(oscuro):
     estilo_vidrio = ft.ButtonStyle(
         icon_size=px(18), shape=forma, bgcolor=c["vidrio"], side=ft.BorderSide(1, c["borde"]),
     )
+    # Ventanas, menús y calendario: vidrio con borde claro
+    def forma_vidrio(radio):
+        return ft.RoundedRectangleBorder(radius=radio, side=ft.BorderSide(1, c["borde"]))
     # Flet no mezcla estos estilos con los de Material: los reemplaza enteros, así
     # que sin un color los textos quedaban sin color propio y algunos seguían en
     # blanco al pasar de modo oscuro a claro. ON_SURFACE es el color normal del
@@ -103,8 +110,8 @@ def crear_tema(oscuro):
     return ft.Theme(
         color_scheme_seed=COLOR_MARCA,
         color_scheme=ft.ColorScheme(
-            surface=c["solido"], surface_container_low=c["solido"], surface_container=c["solido"],
-            surface_container_high=c["solido"], surface_container_lowest=c["vidrio"],
+            surface=c["menu"], surface_container_low=c["menu"], surface_container=c["menu"],
+            surface_container_high=c["menu"], surface_container_lowest=c["vidrio"],
             surface_container_highest=c["campo"], outline_variant=c["borde"], shadow=c["sombra"],
             primary_fixed=c["degradado"][0], secondary_fixed=c["degradado"][1], tertiary_fixed=c["degradado"][2],
             primary_fixed_dim=c["manchas"][0], secondary_fixed_dim=c["manchas"][1],
@@ -120,7 +127,17 @@ def crear_tema(oscuro):
         )),
         outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_vidrio),
         text_button_theme=ft.TextButtonTheme(style=estilo_botones),
-        dialog_theme=ft.DialogTheme(bgcolor=c["solido"], shape=ft.RoundedRectangleBorder(radius=24)),
+        dialog_theme=ft.DialogTheme(bgcolor=c["ventana"], barrier_color=c["velo"], shape=forma_vidrio(24),
+                                    elevation=0),
+        date_picker_theme=ft.DatePickerTheme(bgcolor=c["ventana"], shape=forma_vidrio(24), elevation=0),
+        dropdown_theme=ft.DropdownTheme(menu_style=ft.MenuStyle(
+            bgcolor=c["menu"], shape=forma_vidrio(16), side=ft.BorderSide(1, c["borde"]), shadow_color=c["sombra"],
+        )),
+        popup_menu_theme=ft.PopupMenuTheme(color=c["menu"], shape=forma_vidrio(16), shadow_color=c["sombra"]),
+        snackbar_theme=ft.SnackBarTheme(
+            bgcolor=c["menu"], shape=forma_vidrio(14),
+            content_text_style=ft.TextStyle(size=px(14), color=ft.Colors.ON_SURFACE),
+        ),
         divider_theme=ft.DividerTheme(color=c["borde"], thickness=1),
         navigation_rail_theme=ft.NavigationRailTheme(bgcolor=ft.Colors.TRANSPARENT, indicator_color=c["campo"]),
     )
