@@ -36,7 +36,7 @@ class VistaFiado:
         self.teclas_busqueda = 0
 
         tarjeta_total, self.valor_total = tarjeta_resumen(
-            ft.Icons.MENU_BOOK_OUTLINED, "Total fiado (lo que deben)", ft.Colors.ORANGE)
+            ft.Icons.MENU_BOOK_OUTLINED, "Total fiado (lo que deben)", ft.Colors.PINK_400)
         tarjeta_deudores, self.valor_deudores = tarjeta_resumen(
             ft.Icons.PEOPLE_OUTLINE, "Clientes que deben", ft.Colors.INDIGO)
 
