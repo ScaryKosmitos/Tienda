@@ -12,7 +12,7 @@ import configuracion
 import respaldar
 from componentes import (
     COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, hay_dialogo_abierto, icono_px, mostrar_mensaje, poner_escala,
-    preguntar, px, relieve,
+    preguntar, px, fondo_de_color, vidrio,
 )
 from dialogo_clave import abrir_ajustes_clave
 from dialogo_respaldo import abrir_ajustes_respaldo
@@ -91,7 +91,7 @@ class Aplicacion:
                     controls=[
                         ft.Container(
                             content=ft.Icon(ft.Icons.STOREFRONT, color=ft.Colors.WHITE, size=px(26)),
-                            bgcolor=COLOR_MARCA, border_radius=16, padding=12, shadow=relieve(4),
+                            bgcolor=COLOR_MARCA, border_radius=16, padding=12,
                         ),
                         ft.Text("Tienda", weight=ft.FontWeight.BOLD),
                     ],
@@ -135,13 +135,13 @@ class Aplicacion:
         )
         self.contenido = ft.Container(expand=True, padding=24)
 
-        # La barra lateral es otro recuadro con relieve, separado del borde
-        barra = ft.Container(
-            self.navegacion, bgcolor=ft.Colors.SURFACE, border_radius=26, shadow=relieve(),
-            margin=ft.Margin.only(left=18, top=18, bottom=18),
-        )
+        # La barra lateral es otro recuadro de vidrio, separado del borde
+        barra = ft.Container(self.navegacion, margin=ft.Margin.only(left=18, top=18, bottom=18), **vidrio(26))
         page.controls.clear()
-        page.add(ft.Row([barra, self.contenido], expand=True, spacing=0))
+        page.add(ft.Stack(expand=True, controls=[
+            fondo_de_color(),
+            ft.Row([barra, self.contenido], spacing=0, left=0, top=0, right=0, bottom=0),
+        ]))
 
     def crear_menu_tamano(self):
         """Botón "Aa" con las opciones de tamaño de letra; la elegida lleva una marca."""
