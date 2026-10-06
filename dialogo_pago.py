@@ -8,7 +8,7 @@ import asyncio
 import flet as ft
 
 import base_datos as db
-from componentes import COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, preguntar, px
+from componentes import CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, preguntar, px
 from dialogo_cliente import elegir_cliente
 from formato import formatear_numero, formatear_precio, leer_precio
 
@@ -120,7 +120,7 @@ async def pedir_pago(page, total):
     filas_billetes = [ft.Row(botones[i:i + 4], spacing=8) for i in range(0, len(botones), 4)]
 
     campo_pago = ft.TextField(
-        label="Paga con ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
+        **CAMPO_HUNDIDO, label="Paga con ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
         text_align=ft.TextAlign.CENTER, autofocus=True,
         on_change=actualizar_cambio, on_submit=confirmar,
     )

@@ -8,8 +8,9 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento, crear_tabla, encabezado,
-    icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento,
+    crear_tabla, encabezado, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px, tarjeta_resumen,
+    texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_cliente import pedir_abono, pedir_texto, texto_deuda
@@ -63,7 +64,7 @@ class VistaFiado:
 
     def crear_panel_clientes(self):
         self.campo_buscar = ft.TextField(
-            hint_text="Buscar cliente…", prefix_icon=icono_px(ft.Icons.SEARCH), filled=True, dense=True,
+            **CAMPO_HUNDIDO, hint_text="Buscar cliente…", prefix_icon=icono_px(ft.Icons.SEARCH), dense=True,
             expand=True, on_change=self.al_escribir_busqueda,
         )
         self.check_deben = ft.Checkbox(label="Solo los que deben", value=True,

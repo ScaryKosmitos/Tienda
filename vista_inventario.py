@@ -9,9 +9,9 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas, avisar,
-    con_desplazamiento, crear_tabla, encabezado, escala, etiqueta, icono_px, manejar_errores_bd, mostrar_error_bd,
-    mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas,
+    avisar, con_desplazamiento, crear_tabla, encabezado, escala, etiqueta, icono_px, manejar_errores_bd,
+    mostrar_error_bd, mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_pago import pedir_pago
@@ -79,11 +79,11 @@ class VistaInventario:
 
     def crear_panel_productos(self):
         self.campo_buscar = ft.TextField(
-            hint_text="Buscar por nombre o código…", prefix_icon=icono_px(ft.Icons.SEARCH),
-            filled=True, dense=True, expand=True, on_change=self.al_escribir_busqueda,
+            **CAMPO_HUNDIDO, hint_text="Buscar por nombre o código…", prefix_icon=icono_px(ft.Icons.SEARCH),
+            dense=True, expand=True, on_change=self.al_escribir_busqueda,
         )
         self.menu_categoria = ft.Dropdown(
-            value="Todas", width=px(190), dense=True, filled=True, leading_icon=icono_px(ft.Icons.CATEGORY_OUTLINED),
+            **CAMPO_HUNDIDO, value="Todas", width=px(190), dense=True, leading_icon=icono_px(ft.Icons.CATEGORY_OUTLINED),
             options=[ft.DropdownOption("Todas")], on_select=lambda _: self.filtrar_tabla(),
         )
         self.check_stock_bajo = ft.Checkbox(label="Solo stock bajo", on_change=lambda _: self.filtrar_tabla())
@@ -124,8 +124,8 @@ class VistaInventario:
     def crear_panel_carrito(self):
         # Venta con lector de códigos de barras: cada escaneo suma 1 unidad al carrito
         self.campo_escanear = ft.TextField(
-            hint_text="Escanear código de barras", prefix_icon=icono_px(ft.Icons.QR_CODE_SCANNER),
-            filled=True, autofocus=True, on_submit=self.escanear_codigo,
+            **CAMPO_HUNDIDO, hint_text="Escanear código de barras", prefix_icon=icono_px(ft.Icons.QR_CODE_SCANNER),
+            autofocus=True, on_submit=self.escanear_codigo,
         )
         self.texto_escaneo = ft.Text("", size=px(13), color=COLOR_EXITO, visible=False)
         self.lista_carrito = ft.ListView(spacing=8, expand=True)
@@ -308,7 +308,7 @@ class VistaInventario:
                 return
 
         def campo(etiqueta_campo, valor, icono, **opciones):
-            return ft.TextField(label=etiqueta_campo, value=valor, prefix_icon=icono_px(icono), **opciones)
+            return ft.TextField(**CAMPO_HUNDIDO, label=etiqueta_campo, value=valor, prefix_icon=icono_px(icono), **opciones)
 
         # El código no guarda con Enter: el lector escribe el código y "presiona" Enter,
         # y eso guardaría el producto antes de terminar de llenar el formulario
@@ -541,7 +541,8 @@ class VistaInventario:
 
     def linea_carrito(self, id_producto, linea):
         campo_cantidad = ft.TextField(
-            value=formatear_numero(linea["cantidad"]), width=px(58), dense=True, text_align=ft.TextAlign.CENTER,
+            **CAMPO_HUNDIDO, value=formatear_numero(linea["cantidad"]), width=px(58), dense=True,
+            text_align=ft.TextAlign.CENTER,
             content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
         )
         campo_cantidad.on_submit = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)

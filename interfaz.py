@@ -12,7 +12,7 @@ import configuracion
 import respaldar
 from componentes import (
     COLOR_MARCA, TAMANOS, avisar, crear_tema, escala, hay_dialogo_abierto, icono_px, mostrar_mensaje, poner_escala,
-    preguntar, px,
+    preguntar, px, relieve,
 )
 from dialogo_clave import abrir_ajustes_clave
 from dialogo_respaldo import abrir_ajustes_respaldo
@@ -67,8 +67,8 @@ class Aplicacion:
     def construir(self):
         """Arma el tema, las pantallas y la barra lateral con el tamaño de letra actual."""
         page = self.page
-        page.theme = crear_tema()
-        page.dark_theme = crear_tema()
+        page.theme = crear_tema(oscuro=False)
+        page.dark_theme = crear_tema(oscuro=True)
 
         self.inventario = VistaInventario(page, abrir_entrada=self.abrir_entrada)
         self.ventas = VistaVentas(page)
@@ -91,7 +91,7 @@ class Aplicacion:
                     controls=[
                         ft.Container(
                             content=ft.Icon(ft.Icons.STOREFRONT, color=ft.Colors.WHITE, size=px(26)),
-                            bgcolor=COLOR_MARCA, border_radius=14, padding=10,
+                            bgcolor=COLOR_MARCA, border_radius=16, padding=12, shadow=relieve(4),
                         ),
                         ft.Text("Tienda", weight=ft.FontWeight.BOLD),
                     ],
@@ -135,10 +135,13 @@ class Aplicacion:
         )
         self.contenido = ft.Container(expand=True, padding=24)
 
+        # La barra lateral es otro recuadro con relieve, separado del borde
+        barra = ft.Container(
+            self.navegacion, bgcolor=ft.Colors.SURFACE, border_radius=26, shadow=relieve(),
+            margin=ft.Margin.only(left=18, top=18, bottom=18),
+        )
         page.controls.clear()
-        page.add(ft.Row(
-            [self.navegacion, ft.VerticalDivider(width=1), self.contenido], expand=True, spacing=0,
-        ))
+        page.add(ft.Row([barra, self.contenido], expand=True, spacing=0))
 
     def crear_menu_tamano(self):
         """Botón "Aa" con las opciones de tamaño de letra; la elegida lleva una marca."""

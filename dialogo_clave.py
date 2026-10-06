@@ -7,12 +7,13 @@ import asyncio
 import flet as ft
 
 import seguridad
-from componentes import avisar, icono_px, mostrar_mensaje, preguntar, px
+from componentes import CAMPO_HUNDIDO, avisar, icono_px, mostrar_mensaje, preguntar, px
 
 
 def _campo_clave(etiqueta, **opciones):
     return ft.TextField(
-        label=etiqueta, password=True, can_reveal_password=True, prefix_icon=icono_px(ft.Icons.PIN_OUTLINED),
+        **CAMPO_HUNDIDO, label=etiqueta, password=True, can_reveal_password=True,
+        prefix_icon=icono_px(ft.Icons.PIN_OUTLINED),
         input_filter=ft.NumbersOnlyInputFilter(), text_size=px(20), **opciones,
     )
 

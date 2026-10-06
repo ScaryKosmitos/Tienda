@@ -21,6 +21,15 @@ COLOR_MARCA = ft.Colors.INDIGO
 COLOR_EXITO = ft.Colors.GREEN_700
 COLOR_PELIGRO = ft.Colors.RED
 
+# Estilo neumórfico: todo comparte el mismo fondo y los recuadros parecen
+# salir de él (o hundirse en él) gracias a dos sombras, una clara arriba a la
+# izquierda y una oscura abajo a la derecha. Colores de cada modo:
+# fondo, recuadros hundidos, luz y sombra
+_NEUMORFISMO = {
+    False: dict(fondo="#E4E9F0", hundido="#D9DFE8", luz="#FFFFFF", sombra="#A9B4C6"),
+    True: dict(fondo="#2A2D34", hundido="#23262C", luz="#3A3F49", sombra="#17191D"),
+}
+
 
 # --- TAMAÑO DE LETRA ---
 
@@ -60,24 +69,62 @@ def icono_px(nombre, tamano=20):
     return ft.Icon(nombre, size=px(tamano))
 
 
-def crear_tema():
-    """Tema de la aplicación con las letras e íconos del tamaño elegido."""
+def crear_tema(oscuro):
+    """Tema neumórfico (claro u oscuro) con las letras e íconos del tamaño elegido."""
+    c = _NEUMORFISMO[oscuro]
     # Los íconos de los botones miden 18 en Material Design
-    estilo_botones = ft.ButtonStyle(icon_size=px(18))
+    forma = ft.RoundedRectangleBorder(radius=14)
+    estilo_botones = ft.ButtonStyle(icon_size=px(18), shape=forma)
+    # Los botones con relieve: una sombra suave, como si salieran del fondo
+    estilo_relieve = ft.ButtonStyle(
+        icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
+        bgcolor=c["fondo"], side=ft.BorderSide(0, ft.Colors.TRANSPARENT),
+    )
     # Flet no mezcla estos estilos con los de Material: los reemplaza enteros, así
     # que sin un color los textos quedaban sin color propio y algunos seguían en
     # blanco al pasar de modo oscuro a claro. ON_SURFACE es el color normal del
     # texto y Flet lo calcula aparte para el tema claro y para el oscuro
+    #
+    # Todas las superficies llevan el color del fondo; las "más altas" (campos
+    # de texto rellenos y cuadros internos) llevan el hundido. SURFACE_BRIGHT y
+    # SHADOW guardan la luz y la sombra que usa relieve()
     return ft.Theme(
         color_scheme_seed=COLOR_MARCA,
+        color_scheme=ft.ColorScheme(
+            surface=c["fondo"], surface_container_lowest=c["fondo"], surface_container_low=c["fondo"],
+            surface_container=c["fondo"], surface_container_high=c["fondo"],
+            surface_container_highest=c["hundido"], surface_bright=c["luz"], shadow=c["sombra"],
+        ),
+        scaffold_bgcolor=c["fondo"],
         text_theme=ft.TextTheme(**{
             nombre: ft.TextStyle(size=px(t), color=ft.Colors.ON_SURFACE) for nombre, t in _TAMANOS_TEMA.items()
         }),
         icon_theme=ft.IconTheme(size=px(24)),
-        filled_button_theme=ft.FilledButtonTheme(style=estilo_botones),
-        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_botones),
+        filled_button_theme=ft.FilledButtonTheme(style=ft.ButtonStyle(
+            icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
+        )),
+        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_relieve),
         text_button_theme=ft.TextButtonTheme(style=estilo_botones),
+        dialog_theme=ft.DialogTheme(bgcolor=c["fondo"], shape=ft.RoundedRectangleBorder(radius=24)),
+        divider_theme=ft.DividerTheme(color=c["hundido"], thickness=2),
+        navigation_rail_theme=ft.NavigationRailTheme(bgcolor=ft.Colors.TRANSPARENT, indicator_color=c["hundido"]),
     )
+
+
+# Opciones de todos los ft.TextField y ft.Dropdown: el campo se ve hundido en
+# el fondo, sin borde, y se marca con el color de la tienda al escribir en él
+CAMPO_HUNDIDO = dict(
+    filled=True, fill_color=ft.Colors.SURFACE_CONTAINER_HIGHEST, border_radius=14,
+    border_color=ft.Colors.TRANSPARENT, focused_border_color=COLOR_MARCA,
+)
+
+
+def relieve(alto=6):
+    """Las dos sombras del neumorfismo; 'alto' es cuánto parece sobresalir del fondo."""
+    return [
+        ft.BoxShadow(blur_radius=alto * 2.5, offset=ft.Offset(alto, alto), color=ft.Colors.SHADOW),
+        ft.BoxShadow(blur_radius=alto * 2.5, offset=ft.Offset(-alto, -alto), color=ft.Colors.SURFACE_BRIGHT),
+    ]
 
 
 # --- AVISOS Y PREGUNTAS ---
@@ -167,10 +214,10 @@ def manejar_errores_bd(func):
 # --- PIEZAS VISUALES ---
 
 def panel(contenido, **opciones):
-    """Recuadro redondeado con el fondo de las tarjetas."""
+    """Recuadro redondeado que sobresale del fondo."""
     return ft.Container(
-        content=contenido, padding=opciones.pop("padding", 20), border_radius=16,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW, **opciones,
+        content=contenido, padding=opciones.pop("padding", 20), border_radius=22,
+        bgcolor=ft.Colors.SURFACE, shadow=relieve(), **opciones,
     )
 
 
@@ -201,7 +248,7 @@ def tarjeta_resumen(icono, titulo, color):
             controls=[
                 ft.Container(
                     content=ft.Icon(icono, color=color, size=px(24)),
-                    bgcolor=ft.Colors.with_opacity(0.12, color), border_radius=12, padding=10,
+                    bgcolor=ft.Colors.SURFACE, border_radius=14, padding=10, shadow=relieve(3),
                 ),
                 ft.Column(
                     [ft.Text(titulo, size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1,

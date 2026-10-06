@@ -6,8 +6,8 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento, crear_tabla, encabezado,
-    etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, px, texto_vacio,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento,
+    crear_tabla, encabezado, etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, px, texto_vacio,
 )
 from formato import clave_orden, formatear_cambio, formatear_numero, leer_entero
 
@@ -24,12 +24,12 @@ class VistaEntradas:
         self.total_movimientos = 0
 
         self.menu_producto = ft.Dropdown(
-            label="Producto", leading_icon=icono_px(ft.Icons.INVENTORY_2_OUTLINED), width=px(380), filled=True,
+            **CAMPO_HUNDIDO, label="Producto", leading_icon=icono_px(ft.Icons.INVENTORY_2_OUTLINED), width=px(380),
             editable=True, enable_filter=True, menu_height=px(360), on_select=self.al_elegir_producto,
         )
         self.texto_stock = ft.Text("Elige el producto que llegó", color=ft.Colors.ON_SURFACE_VARIANT)
         self.campo_cantidad = ft.TextField(
-            label="Unidades recibidas", prefix_icon=icono_px(ft.Icons.ADD_BOX_OUTLINED), width=px(200), filled=True,
+            **CAMPO_HUNDIDO, label="Unidades recibidas", prefix_icon=icono_px(ft.Icons.ADD_BOX_OUTLINED), width=px(200),
             disabled=True, on_submit=self.registrar,
         )
         self.boton_registrar = ft.FilledButton(

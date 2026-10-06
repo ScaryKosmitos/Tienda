@@ -10,8 +10,8 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, avisar, encabezado, icono_px, manejar_errores_bd, mostrar_mensaje, panel,
-    preguntar, px, texto_vacio,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, avisar, encabezado, icono_px, manejar_errores_bd,
+    mostrar_mensaje, panel, preguntar, px, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from formato import formatear_numero, formatear_precio, leer_precio
@@ -69,14 +69,14 @@ async def pedir_monto(page, titulo, etiqueta, valor=None, con_motivo=False):
         page.update()
 
     campo = ft.TextField(
-        label=etiqueta, value=formatear_numero(valor) if valor is not None else "", autofocus=True,
+        **CAMPO_HUNDIDO, label=etiqueta, value=formatear_numero(valor) if valor is not None else "", autofocus=True,
         prefix_icon=icono_px(ft.Icons.ATTACH_MONEY), text_size=px(20), text_align=ft.TextAlign.CENTER,
         on_submit=aceptar,
     )
     controles = [campo]
     if con_motivo:
-        campo_motivo = ft.TextField(label="Motivo", hint_text="Ej: pago al proveedor de gaseosas", on_submit=aceptar,
-                                    prefix_icon=icono_px(ft.Icons.NOTES), max_length=100)
+        campo_motivo = ft.TextField(**CAMPO_HUNDIDO, label="Motivo", hint_text="Ej: pago al proveedor de gaseosas",
+                                    on_submit=aceptar, prefix_icon=icono_px(ft.Icons.NOTES), max_length=100)
         controles.append(campo_motivo)
 
     page.show_dialog(ft.AlertDialog(

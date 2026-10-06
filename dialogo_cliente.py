@@ -7,7 +7,7 @@ import asyncio
 import flet as ft
 
 import base_datos as db
-from componentes import COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, px
+from componentes import CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, icono_px, mostrar_error_bd, px
 from formato import formatear_numero, formatear_precio, leer_precio, sin_tildes
 
 # La lista para elegir cliente muestra como máximo estos; los demás se encuentran
@@ -91,7 +91,7 @@ async def elegir_cliente(page, titulo):
             lista.controls[0].on_click(None)
 
     campo = ft.TextField(
-        label="Buscar o escribir el nombre del cliente", prefix_icon=icono_px(ft.Icons.SEARCH),
+        **CAMPO_HUNDIDO, label="Buscar o escribir el nombre del cliente", prefix_icon=icono_px(ft.Icons.SEARCH),
         autofocus=True, on_change=al_escribir, on_submit=al_enter,
     )
     boton_nuevo.on_click = crear
@@ -133,7 +133,7 @@ async def pedir_texto(page, titulo, etiqueta, guardar, valor=""):
         else:
             terminar(True)
 
-    campo = ft.TextField(label=etiqueta, value=valor, autofocus=True, on_submit=aceptar,
+    campo = ft.TextField(**CAMPO_HUNDIDO, label=etiqueta, value=valor, autofocus=True, on_submit=aceptar,
                          prefix_icon=icono_px(ft.Icons.PERSON_OUTLINE))
     page.show_dialog(ft.AlertDialog(
         title=ft.Text(titulo),
@@ -201,7 +201,7 @@ async def pedir_abono(page, cliente):
         ],
     )
     campo = ft.TextField(
-        label="Abona ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
+        **CAMPO_HUNDIDO, label="Abona ($)", prefix_icon=icono_px(ft.Icons.PAYMENTS_OUTLINED), text_size=px(20),
         text_align=ft.TextAlign.CENTER, autofocus=True, on_change=actualizar, on_submit=aceptar,
     )
     page.show_dialog(ft.AlertDialog(

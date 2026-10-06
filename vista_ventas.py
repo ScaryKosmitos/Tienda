@@ -11,9 +11,9 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas, avisar, con_desplazamiento,
-    crear_tabla, encabezado, etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, preguntar, px,
-    texto_vacio,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas, avisar,
+    con_desplazamiento, crear_tabla, encabezado, etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel,
+    preguntar, px, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_recibo import mostrar_recibo
@@ -90,7 +90,7 @@ class VistaVentas:
 
     def campo_fecha(self, etiqueta_campo):
         campo = ft.TextField(
-            label=etiqueta_campo, hint_text="AAAA-MM-DD", width=px(170), dense=True, filled=True,
+            **CAMPO_HUNDIDO, label=etiqueta_campo, hint_text="AAAA-MM-DD", width=px(170), dense=True,
             on_submit=lambda _: self.cargar(),
         )
 
