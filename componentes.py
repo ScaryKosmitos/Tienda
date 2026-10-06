@@ -21,28 +21,16 @@ COLOR_MARCA = ft.Colors.INDIGO
 COLOR_EXITO = ft.Colors.GREEN_700
 COLOR_PELIGRO = ft.Colors.RED
 
-# Estilo glassmorfismo: un fondo de colores degradados con manchas de luz, y
-# encima recuadros de "vidrio esmerilado": translúcidos, con el fondo borroso
-# detrás y un borde fino claro. Colores de cada modo: los tres del degradado,
-# las tres manchas, el vidrio, su borde, los campos de texto, las ventanas y
-# los menús (un vidrio más tupido, porque Flet no puede desenfocar lo que
-# queda detrás de ellos), el velo que cubre la tienda al abrir una ventana y
-# la sombra
-_VIDRIO = {
-    False: dict(
-        degradado=("#C9D6FF", "#E2C6F5", "#FBD3E9"), manchas=("#7F9CFF", "#F48FC0", "#6EDDD0"),
-        vidrio=ft.Colors.with_opacity(0.35, "#FFFFFF"), borde=ft.Colors.with_opacity(0.65, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.45, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.93, "#F7F5FF"),
-        menu=ft.Colors.with_opacity(0.94, "#F7F5FF"), velo=ft.Colors.with_opacity(0.55, "#C9C2F0"),
-        sombra=ft.Colors.with_opacity(0.18, "#1F2A5C"),
-    ),
-    True: dict(
-        degradado=("#0F1028", "#1B1240", "#2A0F3A"), manchas=("#6366F1", "#D946EF", "#22D3EE"),
-        vidrio=ft.Colors.with_opacity(0.07, "#FFFFFF"), borde=ft.Colors.with_opacity(0.20, "#FFFFFF"),
-        campo=ft.Colors.with_opacity(0.10, "#FFFFFF"), ventana=ft.Colors.with_opacity(0.93, "#2A2350"),
-        menu=ft.Colors.with_opacity(0.94, "#241E42"), velo=ft.Colors.with_opacity(0.65, "#0B0A1E"),
-        sombra=ft.Colors.with_opacity(0.35, "#000000"),
-    ),
+# Estilo neumórfico: todo comparte el mismo fondo y los recuadros parecen
+# salir de él (o hundirse en él) gracias a dos sombras, una clara arriba a la
+# izquierda y una oscura abajo a la derecha. Colores de cada modo:
+# fondo, recuadros hundidos, luz, sombra y el velo que cubre la tienda al
+# abrir una ventana
+_NEUMORFISMO = {
+    False: dict(fondo="#E4E9F0", hundido="#D9DFE8", luz="#FFFFFF", sombra="#A9B4C6",
+                velo=ft.Colors.with_opacity(0.45, "#A9B4C6")),
+    True: dict(fondo="#2A2D34", hundido="#23262C", luz="#3A3F49", sombra="#17191D",
+               velo=ft.Colors.with_opacity(0.60, "#17191D")),
 }
 
 
@@ -85,105 +73,76 @@ def icono_px(nombre, tamano=20):
 
 
 def crear_tema(oscuro):
-    """Tema de vidrio (claro u oscuro) con las letras e íconos del tamaño elegido."""
-    c = _VIDRIO[oscuro]
+    """Tema neumórfico (claro u oscuro) con las letras e íconos del tamaño elegido."""
+    c = _NEUMORFISMO[oscuro]
     # Los íconos de los botones miden 18 en Material Design
     forma = ft.RoundedRectangleBorder(radius=14)
     estilo_botones = ft.ButtonStyle(icon_size=px(18), shape=forma)
-    # Los botones sin color son de vidrio, como los recuadros
-    estilo_vidrio = ft.ButtonStyle(
-        icon_size=px(18), shape=forma, bgcolor=c["vidrio"], side=ft.BorderSide(1, c["borde"]),
+    # Los botones con relieve: una sombra suave, como si salieran del fondo
+    estilo_relieve = ft.ButtonStyle(
+        icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
+        bgcolor=c["fondo"], side=ft.BorderSide(0, ft.Colors.TRANSPARENT),
     )
-    # Ventanas, menús y calendario: vidrio con borde claro
-    def forma_vidrio(radio):
-        return ft.RoundedRectangleBorder(radius=radio, side=ft.BorderSide(1, c["borde"]))
+    # Ventanas, menús y calendario: del color del fondo, con su sombra, sin borde
+    def forma_suave(radio):
+        return ft.RoundedRectangleBorder(radius=radio)
     # Flet no mezcla estos estilos con los de Material: los reemplaza enteros, así
     # que sin un color los textos quedaban sin color propio y algunos seguían en
     # blanco al pasar de modo oscuro a claro. ON_SURFACE es el color normal del
     # texto y Flet lo calcula aparte para el tema claro y para el oscuro
     #
-    # Los recuadros se arman una sola vez y deben cambiar al pasar de modo claro a
-    # oscuro, así que toman sus colores del tema: SURFACE_CONTAINER_LOWEST es el
-    # vidrio, OUTLINE_VARIANT su borde (y las líneas de las tablas), SHADOW la
-    # sombra, SURFACE_CONTAINER_HIGHEST los campos y cuadros internos, y los
-    # "fixed" (que Material casi no usa) el degradado y las manchas del fondo
+    # Todas las superficies llevan el color del fondo; las "más altas" (campos
+    # de texto rellenos y cuadros internos) llevan el hundido. SURFACE_BRIGHT y
+    # SHADOW guardan la luz y la sombra que usa relieve()
     return ft.Theme(
         color_scheme_seed=COLOR_MARCA,
         color_scheme=ft.ColorScheme(
-            surface=c["menu"], surface_container_low=c["menu"], surface_container=c["menu"],
-            surface_container_high=c["menu"], surface_container_lowest=c["vidrio"],
-            surface_container_highest=c["campo"], outline_variant=c["borde"], shadow=c["sombra"],
-            primary_fixed=c["degradado"][0], secondary_fixed=c["degradado"][1], tertiary_fixed=c["degradado"][2],
-            primary_fixed_dim=c["manchas"][0], secondary_fixed_dim=c["manchas"][1],
-            tertiary_fixed_dim=c["manchas"][2],
+            surface=c["fondo"], surface_container_lowest=c["fondo"], surface_container_low=c["fondo"],
+            surface_container=c["fondo"], surface_container_high=c["fondo"],
+            surface_container_highest=c["hundido"], surface_bright=c["luz"], shadow=c["sombra"],
         ),
-        scaffold_bgcolor=c["degradado"][0],
+        scaffold_bgcolor=c["fondo"],
         text_theme=ft.TextTheme(**{
             nombre: ft.TextStyle(size=px(t), color=ft.Colors.ON_SURFACE) for nombre, t in _TAMANOS_TEMA.items()
         }),
         icon_theme=ft.IconTheme(size=px(24)),
         filled_button_theme=ft.FilledButtonTheme(style=ft.ButtonStyle(
-            icon_size=px(18), shape=forma, elevation=3, shadow_color=c["sombra"],
+            icon_size=px(18), shape=forma, elevation=4, shadow_color=c["sombra"],
         )),
-        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_vidrio),
+        outlined_button_theme=ft.OutlinedButtonTheme(style=estilo_relieve),
         text_button_theme=ft.TextButtonTheme(style=estilo_botones),
-        dialog_theme=ft.DialogTheme(bgcolor=c["ventana"], barrier_color=c["velo"], shape=forma_vidrio(24),
-                                    elevation=0),
-        date_picker_theme=ft.DatePickerTheme(bgcolor=c["ventana"], shape=forma_vidrio(24), elevation=0),
+        dialog_theme=ft.DialogTheme(bgcolor=c["fondo"], barrier_color=c["velo"], shape=forma_suave(24),
+                                    elevation=12, shadow_color=c["sombra"]),
+        date_picker_theme=ft.DatePickerTheme(bgcolor=c["fondo"], shape=forma_suave(24), elevation=12,
+                                             shadow_color=c["sombra"]),
         dropdown_theme=ft.DropdownTheme(menu_style=ft.MenuStyle(
-            bgcolor=c["menu"], shape=forma_vidrio(16), side=ft.BorderSide(1, c["borde"]), shadow_color=c["sombra"],
+            bgcolor=c["fondo"], shape=forma_suave(16), elevation=8, shadow_color=c["sombra"],
         )),
-        popup_menu_theme=ft.PopupMenuTheme(color=c["menu"], shape=forma_vidrio(16), shadow_color=c["sombra"]),
+        popup_menu_theme=ft.PopupMenuTheme(color=c["fondo"], shape=forma_suave(16), elevation=8,
+                                           shadow_color=c["sombra"]),
         snackbar_theme=ft.SnackBarTheme(
-            bgcolor=c["menu"], shape=forma_vidrio(14),
+            bgcolor=c["fondo"], shape=forma_suave(14), elevation=8,
             content_text_style=ft.TextStyle(size=px(14), color=ft.Colors.ON_SURFACE),
         ),
-        divider_theme=ft.DividerTheme(color=c["borde"], thickness=1),
-        navigation_rail_theme=ft.NavigationRailTheme(bgcolor=ft.Colors.TRANSPARENT, indicator_color=c["campo"]),
+        divider_theme=ft.DividerTheme(color=c["hundido"], thickness=2),
+        navigation_rail_theme=ft.NavigationRailTheme(bgcolor=ft.Colors.TRANSPARENT, indicator_color=c["hundido"]),
     )
 
 
-# Opciones de todos los ft.TextField y ft.Dropdown: el campo es un vidrio más
-# claro, sin borde, y se marca con el color de la tienda al escribir en él
+# Opciones de todos los ft.TextField y ft.Dropdown: el campo se ve hundido en
+# el fondo, sin borde, y se marca con el color de la tienda al escribir en él
 CAMPO_HUNDIDO = dict(
     filled=True, fill_color=ft.Colors.SURFACE_CONTAINER_HIGHEST, border_radius=14,
     border_color=ft.Colors.TRANSPARENT, focused_border_color=COLOR_MARCA,
 )
 
 
-def vidrio(radio=22):
-    """Opciones de ft.Container para un recuadro de vidrio esmerilado."""
-    return dict(
-        bgcolor=ft.Colors.SURFACE_CONTAINER_LOWEST, border_radius=radio, blur=ft.Blur(24, 24),
-        border=ft.Border.all(1, ft.Colors.OUTLINE_VARIANT),
-        shadow=ft.BoxShadow(blur_radius=30, offset=ft.Offset(0, 10), color=ft.Colors.SHADOW),
-    )
-
-
-def fondo_de_color():
-    """El degradado con manchas de luz que se ve detrás del vidrio. Va al fondo de un ft.Stack."""
-    def mancha(color, tamano, **posicion):
-        return ft.Container(
-            width=tamano, height=tamano, shape=ft.BoxShape.CIRCLE, **posicion,
-            gradient=ft.RadialGradient(colors=[ft.Colors.with_opacity(0.75, color),
-                                               ft.Colors.with_opacity(0.0, color)]),
-        )
-
-    return ft.Stack(
-        left=0, top=0, right=0, bottom=0,
-        controls=[
-            ft.Container(
-                left=0, top=0, right=0, bottom=0,
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment.TOP_LEFT, end=ft.Alignment.BOTTOM_RIGHT,
-                    colors=[ft.Colors.PRIMARY_FIXED, ft.Colors.SECONDARY_FIXED, ft.Colors.TERTIARY_FIXED],
-                ),
-            ),
-            mancha(ft.Colors.PRIMARY_FIXED_DIM, 760, left=-180, top=-220),
-            mancha(ft.Colors.SECONDARY_FIXED_DIM, 680, right=-160, top=120),
-            mancha(ft.Colors.TERTIARY_FIXED_DIM, 620, left=360, bottom=-260),
-        ],
-    )
+def relieve(alto=6):
+    """Las dos sombras del neumorfismo; 'alto' es cuánto parece sobresalir del fondo."""
+    return [
+        ft.BoxShadow(blur_radius=alto * 2.5, offset=ft.Offset(alto, alto), color=ft.Colors.SHADOW),
+        ft.BoxShadow(blur_radius=alto * 2.5, offset=ft.Offset(-alto, -alto), color=ft.Colors.SURFACE_BRIGHT),
+    ]
 
 
 # --- AVISOS Y PREGUNTAS ---
@@ -273,9 +232,10 @@ def manejar_errores_bd(func):
 # --- PIEZAS VISUALES ---
 
 def panel(contenido, **opciones):
-    """Recuadro de vidrio esmerilado."""
+    """Recuadro redondeado que sobresale del fondo."""
     return ft.Container(
-        content=contenido, padding=opciones.pop("padding", 20), **vidrio(), **opciones,
+        content=contenido, padding=opciones.pop("padding", 20), border_radius=22,
+        bgcolor=ft.Colors.SURFACE, shadow=relieve(), **opciones,
     )
 
 
@@ -306,7 +266,7 @@ def tarjeta_resumen(icono, titulo, color):
             controls=[
                 ft.Container(
                     content=ft.Icon(icono, color=color, size=px(24)),
-                    bgcolor=ft.Colors.with_opacity(0.15, color), border_radius=14, padding=10,
+                    bgcolor=ft.Colors.SURFACE, border_radius=14, padding=10, shadow=relieve(3),
                 ),
                 ft.Column(
                     [ft.Text(titulo, size=px(13), color=ft.Colors.ON_SURFACE_VARIANT, max_lines=1,
