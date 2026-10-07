@@ -85,7 +85,7 @@ async def pedir_peso(page, producto, gramos=None):
         page.update()
 
     campo_peso = ft.TextField(
-        **CAMPO_HUNDIDO, label="Peso (gramos)", hint_text="Ej: 750", suffix=ft.Text("g"), expand=True,
+        **CAMPO_HUNDIDO, label="Peso (gramos)", hint_text="Ej: 750", expand=True,
         prefix_icon=icono_px(ft.Icons.SCALE_OUTLINED), text_size=px(20), autofocus=True,
         on_change=al_escribir_peso, on_submit=confirmar,
     )

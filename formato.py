@@ -16,6 +16,8 @@ _SIN_MILES = re.compile(r"\d+([.,]\d{1,2})?")
 _ENTERO = re.compile(r"-?(\d{1,3}(\.\d{3})+|\d+)")
 # 12 / 12,5 / 0,750 / 1.5     -> kilos, con hasta 3 decimales (gramos)
 _KILOS = re.compile(r"\d+([.,]\d{1,3})?")
+# 1.5 / 2.25                  -> kilos con punto (con tres decimales, 1.500, son miles de gramos)
+_KILOS_CON_PUNTO = re.compile(r"\d+\.\d{1,2}")
 
 
 def leer_precio(texto):
@@ -59,14 +61,15 @@ def leer_kilos(texto):
 
 def leer_gramos(texto):
     """
-    Peso escrito en la venta: un entero son gramos ('750', '1.500') y un número
-    con coma son kilos ('1,5' = 1.500 g), como lo muestran las grameras.
+    Peso escrito en la venta: un entero son gramos ('750', '1.500') y son kilos
+    un número con coma ('1,5' = 1.500 g), con punto y uno o dos decimales
+    ('1.5', como lo muestran algunas grameras) o con 'kg' ('1,5 kg').
     Retorna gramos enteros. Lanza ValueError si no es un peso válido.
     """
-    limpio = texto.lower().replace("g", "").replace(" ", "").strip()
-    if "," in limpio:
+    limpio = texto.lower().replace(" ", "").strip()
+    if limpio.endswith("kg") or "," in limpio or _KILOS_CON_PUNTO.fullmatch(limpio):
         return leer_kilos(limpio)
-    return leer_entero(limpio)
+    return leer_entero(limpio.removesuffix("g"))
 
 
 def formatear_numero(valor):

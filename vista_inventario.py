@@ -394,11 +394,18 @@ class VistaInventario:
 
         # Solo se elige al crear el producto: cambiarlo después cambiaría el
         # sentido de las cantidades de sus ventas y entradas ya registradas
-        interruptor_peso = ft.Switch(
-            label="Se vende por peso", value=por_peso, disabled=producto is not None,
-            on_change=al_cambiar_peso,
-        )
+        interruptor_peso = ft.Switch(label="Se vende por peso", value=por_peso, on_change=al_cambiar_peso)
         poner_etiquetas()
+        if producto is None:
+            fila_peso = interruptor_peso
+        elif por_peso:
+            # Un interruptor bloqueado se ve apagado aunque esté prendido: mejor un aviso
+            fila_peso = ft.Row([
+                ft.Icon(ft.Icons.SCALE_OUTLINED, color=COLOR_MARCA, size=px(20)),
+                ft.Text("Se vende por peso: el precio es por kilo", color=ft.Colors.ON_SURFACE_VARIANT),
+            ])
+        else:
+            fila_peso = None
         interruptor_rapido = ft.Switch(
             label="Botón rápido de venta (para productos sin código)",
             value=bool(producto["boton_rapido"]) if producto else False,
@@ -525,8 +532,8 @@ class VistaInventario:
             title=ft.Text("Editar producto" if producto else "Nuevo producto"),
             content=ft.Column(
                 tight=True, spacing=14, width=px(460), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[campo_nombre, campo_codigo, campo_categoria, interruptor_peso,
-                          ft.Row([campo_precio, campo_stock]), interruptor_rapido],
+                controls=[c for c in (campo_nombre, campo_codigo, campo_categoria, fila_peso,
+                                      ft.Row([campo_precio, campo_stock]), interruptor_rapido) if c],
             ),
             actions=acciones,
             actions_alignment=ft.MainAxisAlignment.END,
