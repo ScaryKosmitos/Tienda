@@ -164,13 +164,15 @@ class VistaVentas:
                 self.pie_ventas.control,
                 ft.Divider(height=1),
                 ft.Row(
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    spacing=16,
                     controls=[
-                        # Pastilla verde suave, como las del stock en Inventario
+                        # Pastilla verde suave, como las del stock en Inventario. Ocupa el
+                        # espacio que deja el botón: con letra grande el texto pasa a dos
+                        # líneas en vez de empujar el botón fuera de la pantalla
                         ft.Container(
                             self.texto_total, bgcolor=ft.Colors.with_opacity(0.12, COLOR_EXITO), border_radius=30,
                             border=ft.Border.all(1, ft.Colors.with_opacity(0.3, COLOR_EXITO)),
-                            padding=ft.Padding.symmetric(horizontal=18, vertical=8),
+                            padding=ft.Padding.symmetric(horizontal=18, vertical=8), expand=True,
                         ),
                         self.boton_anular,
                     ],
@@ -260,24 +262,25 @@ class VistaVentas:
         self.desde, self.hasta = desde, hasta
         periodo = describir_periodo(desde, hasta)
         self.seleccion.clear()
-        self.mostrar_ventas(ventas, resumen, periodo)
+        self.mostrar_ventas(ventas, resumen)
         self.mostrar_ranking(ranking, periodo)
         self.page.update()
 
-    def mostrar_ventas(self, ventas, resumen, periodo):
+    def mostrar_ventas(self, ventas, resumen):
         """'ventas' son las líneas a mostrar (las más recientes) y 'resumen' los totales de todo el período."""
         self.tabla_ventas.rows = [self.fila_venta(v) for v in ventas]
         self.ultima_venta = ventas[-1] if ventas else None
         self.lineas_periodo = resumen["todas"]
         self.sin_ventas.visible = not ventas
         self.actualizar_pie_ventas()
-        # Cuánto de lo vendido fue por Nequi o fiado (lo demás, en efectivo)
+        # Cuánto de lo vendido fue por Nequi o fiado (lo demás, en efectivo). El
+        # período no se repite aquí: ya se ve en las fechas de arriba
         partes = [f"{nombre}: {formatear_precio(resumen[clave])}"
                   for nombre, clave in (("Nequi", "nequi"), ("fiado", "fiado")) if resumen[clave]]
-        self.texto_total.value = f"Total vendido ({periodo}): {formatear_precio(resumen['total'])}"
+        self.texto_total.value = f"Total vendido: {formatear_precio(resumen['total'])}"
         if partes:
             self.texto_total.value += f" (de eso {', '.join(partes)})"
-        self.texto_total.value += f"  ·  {formatear_numero(resumen['lineas'])} líneas de venta"
+        self.texto_total.value += f"  ·  {formatear_numero(resumen['lineas'])} líneas"
         self.actualizar_boton_anular()
 
     @manejar_errores_bd
