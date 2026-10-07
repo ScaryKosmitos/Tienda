@@ -11,7 +11,7 @@ import base_datos as db
 from componentes import (
     CAMPO_HUNDIDO, COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas,
     avisar, con_desplazamiento, crear_tabla, encabezado, escala, etiqueta, icono_px, manejar_errores_bd,
-    mostrar_error_bd, mostrar_mensaje, panel, preguntar, px, tarjeta_resumen, texto_vacio,
+    mostrar_error_bd, mostrar_mensaje, panel, preguntar, px, relieve, tarjeta_resumen, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_pago import pedir_pago
@@ -68,6 +68,7 @@ class VistaInventario:
                     ),
                 ),
                 ft.Row([tarjeta_productos, tarjeta_bajo, tarjeta_inventario, tarjeta_hoy], spacing=12),
+                self.crear_franja_rapidos(),
                 ft.Row(
                     [self.crear_panel_productos(), self.crear_panel_carrito()],
                     expand=True, spacing=16, vertical_alignment=ft.CrossAxisAlignment.STRETCH,
@@ -120,6 +121,47 @@ class VistaInventario:
             ),
             expand=True,
         )
+
+    def crear_franja_rapidos(self):
+        """Botones grandes para vender con un toque los productos sin código de barras (pan, huevos…)."""
+        self.fila_rapidos = ft.Row(spacing=14, scroll=ft.ScrollMode.AUTO)
+        self.franja_rapidos = ft.Container(
+            self.fila_rapidos, visible=False,
+            # Espacio para que se vea el relieve de los botones sin que la franja lo corte
+            padding=ft.Padding.symmetric(horizontal=8, vertical=8),
+        )
+        return self.franja_rapidos
+
+    def boton_rapido(self, p):
+        agotado = p["stock"] <= 0
+        return ft.Container(
+            # Todos del mismo tamaño: el nombre arriba (hasta 2 líneas) y el precio abajo
+            width=px(150),
+            height=px(84),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+            border_radius=18,
+            bgcolor=ft.Colors.SURFACE,
+            ink=not agotado,
+            shadow=None if agotado else relieve(4),
+            opacity=0.45 if agotado else 1,
+            tooltip="Agotado" if agotado else f"Tocar para agregar 1 al carrito (quedan {formatear_numero(p['stock'])})",
+            on_click=None if agotado else lambda _, id_p=p["id"]: self.agregar_desde_tabla(id_p),
+            content=ft.Column(
+                spacing=4,
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                controls=[
+                    ft.Text(p["nombre"], weight=ft.FontWeight.BOLD, size=px(16), max_lines=2,
+                            overflow=ft.TextOverflow.ELLIPSIS),
+                    ft.Text("Agotado" if agotado else formatear_precio(p["precio"]), size=px(15),
+                            weight=ft.FontWeight.W_600, color=COLOR_PELIGRO if agotado else COLOR_EXITO),
+                ],
+            ),
+        )
+
+    def actualizar_rapidos(self):
+        productos = db.obtener_botones_rapidos()
+        self.fila_rapidos.controls = [self.boton_rapido(p) for p in productos]
+        self.franja_rapidos.visible = bool(productos)
 
     def crear_panel_carrito(self):
         # Venta con lector de códigos de barras: cada escaneo suma 1 unidad al carrito
@@ -180,6 +222,7 @@ class VistaInventario:
         """Recarga todo después de un cambio en los productos: categorías, tarjetas de resumen y tabla."""
         self.actualizar_menu_categorias()
         self.actualizar_resumen()
+        self.actualizar_rapidos()
         self.filtrar_tabla()
 
     async def al_escribir_busqueda(self, _e):
@@ -323,6 +366,10 @@ class VistaInventario:
         campo_stock = campo("Stock (unidades)", formatear_numero(producto["stock"]) if producto else "",
                             ft.Icons.LAYERS_OUTLINED, expand=True)
         campos = [campo_nombre, campo_codigo, campo_categoria, campo_precio, campo_stock]
+        interruptor_rapido = ft.Switch(
+            label="Botón rápido de venta (para productos sin código)",
+            value=bool(producto["boton_rapido"]) if producto else False,
+        )
 
         def marcar_error(campo_con_error, mensaje):
             campo_con_error.error_text = mensaje
@@ -390,9 +437,11 @@ class VistaInventario:
                 return
 
             if id_producto is not None:
-                exito, mensaje = db.actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo_leido)
+                exito, mensaje = db.actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo_leido,
+                                                        interruptor_rapido.value)
             else:
-                exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock, codigo_leido)
+                exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock, codigo_leido,
+                                                     interruptor_rapido.value)
             if not exito:
                 mostrar_mensaje(self.page, "Dato Inválido", mensaje, error=True)
                 return
@@ -439,7 +488,8 @@ class VistaInventario:
             title=ft.Text("Editar producto" if producto else "Nuevo producto"),
             content=ft.Column(
                 tight=True, spacing=14, width=px(460), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[campo_nombre, campo_codigo, campo_categoria, ft.Row([campo_precio, campo_stock])],
+                controls=[campo_nombre, campo_codigo, campo_categoria, ft.Row([campo_precio, campo_stock]),
+                          interruptor_rapido],
             ),
             actions=acciones,
             actions_alignment=ft.MainAxisAlignment.END,

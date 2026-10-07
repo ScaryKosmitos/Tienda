@@ -78,6 +78,10 @@ def inicializar_db():
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_codigo ON productos (codigo_barras)"
             )
+            # Productos que se venden con un botón grande en la pantalla de venta
+            # (los que no tienen código de barras, como el pan o los huevos)
+            if "boton_rapido" not in columnas_productos:
+                cursor.execute("ALTER TABLE productos ADD COLUMN boton_rapido INTEGER NOT NULL DEFAULT 0")
 
             # Un recibo agrupa las líneas de una misma venta y guarda con cuánto pagó el cliente
             cursor.execute("""
@@ -309,10 +313,11 @@ def categoria_es_nueva(categoria):
     """True si no hay ningún producto con esa categoría (sin importar mayúsculas ni tildes)."""
     return all(sin_tildes(c) != sin_tildes(categoria) for c in obtener_categorias())
 
-def agregar_producto(nombre, categoria, precio, stock, codigo=None):
+def agregar_producto(nombre, categoria, precio, stock, codigo=None, boton_rapido=False):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
     con stock 0 (por ejemplo, uno que todavía no ha llegado). 'codigo' es el
-    código de barras, o None si el producto no tiene."""
+    código de barras, o None si el producto no tiene. 'boton_rapido' lo muestra
+    como botón grande en la pantalla de venta."""
     error = validar_producto(precio, stock)
     if error:
         return False, error
@@ -332,9 +337,9 @@ def agregar_producto(nombre, categoria, precio, stock, codigo=None):
                 return False, _mensaje_repetido(existente)
             categoria = _categoria_existente(cursor, categoria)
             cursor.execute("""
-                INSERT INTO productos (nombre, categoria, precio, stock, codigo_barras)
-                VALUES (?, ?, ?, ?, ?)
-            """, (nombre, categoria, precio, stock, codigo))
+                INSERT INTO productos (nombre, categoria, precio, stock, codigo_barras, boton_rapido)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (nombre, categoria, precio, stock, codigo, int(boton_rapido)))
             if stock > 0:
                 _registrar_movimiento(cursor, cursor.lastrowid, nombre, stock, "Stock inicial")
         return True, "Producto agregado."
@@ -377,6 +382,16 @@ def buscar_productos(texto="", categoria=None, stock_menor_a=None):
         ]
     return productos
 
+def obtener_botones_rapidos():
+    """Productos que se muestran como botón grande en la pantalla de venta, por nombre."""
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        cursor.execute("SELECT * FROM productos WHERE boton_rapido = 1")
+        return sorted(cursor.fetchall(), key=lambda p: clave_orden(p["nombre"]))
+    finally:
+        conexion.close()
+
 def obtener_categorias():
     """Retorna la lista de categorías distintas, en orden alfabético español."""
     conexion = conectar()
@@ -388,7 +403,7 @@ def obtener_categorias():
     finally:
         conexion.close()
 
-def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=None):
+def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=None, boton_rapido=False):
     """Retorna (exito: bool, mensaje: str). El stock puede quedar en 0 (agotado),
     pero nunca negativo, y el precio siempre debe ser mayor a 0. 'codigo' es el
     código de barras, o None para dejar el producto sin código."""
@@ -421,9 +436,9 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=No
             categoria = _categoria_existente(cursor, categoria, excluir_id=id_producto)
             cursor.execute("""
                 UPDATE productos
-                SET nombre = ?, categoria = ?, precio = ?, stock = ?, codigo_barras = ?
+                SET nombre = ?, categoria = ?, precio = ?, stock = ?, codigo_barras = ?, boton_rapido = ?
                 WHERE id = ?
-            """, (nombre, categoria, precio, stock, codigo, id_producto))
+            """, (nombre, categoria, precio, stock, codigo, int(boton_rapido), id_producto))
 
             # Un cambio de stock hecho a mano queda registrado como ajuste
             diferencia = stock - res["stock"]
@@ -465,7 +480,7 @@ class _VentaRechazada(Exception):
 
 
 def obtener_producto(id_producto):
-    """Retorna el producto (columnas id, nombre, categoria, precio, stock, codigo_barras) o None si no existe."""
+    """Retorna el producto (columnas id, nombre, categoria, precio, stock, codigo_barras, boton_rapido) o None si no existe."""
     conexion = conectar()
     try:
         cursor = conexion.cursor()
