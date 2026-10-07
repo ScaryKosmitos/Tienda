@@ -9,14 +9,18 @@ import flet as ft
 
 import base_datos as db
 from componentes import (
-    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, STOCK_BAJO, PieMostrarMas,
-    avisar, con_desplazamiento, crear_tabla, encabezado, escala, etiqueta, icono_px, manejar_errores_bd,
+    CAMPO_HUNDIDO, COLOR_EXITO, COLOR_MARCA, COLOR_PELIGRO, ERRORES_BD, FILAS_POR_TANDA, PieMostrarMas,
+    avisar, con_desplazamiento, crear_tabla, encabezado, es_stock_bajo, escala, etiqueta, icono_px, manejar_errores_bd,
     mostrar_error_bd, mostrar_mensaje, panel, preguntar, px, relieve, tarjeta_resumen, texto_vacio,
 )
 from dialogo_clave import pedir_clave
 from dialogo_pago import pedir_pago
+from dialogo_peso import pedir_peso
 from dialogo_recibo import mostrar_recibo
-from formato import clave_orden, formatear_numero, formatear_precio, leer_entero, leer_precio
+from formato import (
+    clave_orden, formatear_cantidad, formatear_kilos, formatear_numero, formatear_precio, leer_entero, leer_kilos,
+    leer_precio,
+)
 
 # Clave para ordenar cada columna de la tabla (en el mismo orden que las columnas)
 CLAVES_ORDEN = [
@@ -31,12 +35,17 @@ CLAVES_ORDEN = [
 ESPERA_BUSQUEDA = 0.3
 
 
+def precio_con_unidad(producto):
+    """'$2.500', o '$28.000/kg' si se vende por peso."""
+    return formatear_precio(producto["precio"]) + ("/kg" if producto["por_peso"] else "")
+
+
 class VistaInventario:
     def __init__(self, page, abrir_entrada):
         """'abrir_entrada(id_producto)' lleva a la pantalla de entradas con ese producto elegido."""
         self.page = page
         self.abrir_entrada = abrir_entrada
-        # Carrito: id_producto -> {"nombre", "precio", "cantidad"}
+        # Carrito: id_producto -> {"nombre", "precio", "cantidad", "por_peso"} (por peso, la cantidad son gramos)
         self.carrito = {}
         # Columna por la que se ordena la tabla (None = orden de la base de datos)
         self.columna_ordenada = None
@@ -144,15 +153,17 @@ class VistaInventario:
             ink=not agotado,
             shadow=None if agotado else relieve(4),
             opacity=0.45 if agotado else 1,
-            tooltip="Agotado" if agotado else f"Tocar para agregar 1 al carrito (quedan {formatear_numero(p['stock'])})",
-            on_click=None if agotado else lambda _, id_p=p["id"]: self.agregar_desde_tabla(id_p),
+            tooltip="Agotado" if agotado else (
+                f"Tocar para {'pesar y agregar' if p['por_peso'] else 'agregar 1'} al carrito "
+                f"(quedan {formatear_cantidad(p['stock'], p['por_peso'])})"),
+            on_click=None if agotado else lambda _, id_p=p["id"]: self.page.run_task(self.agregar_desde_tabla, id_p),
             content=ft.Column(
                 spacing=4,
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
                     ft.Text(p["nombre"], weight=ft.FontWeight.BOLD, size=px(16), max_lines=2,
                             overflow=ft.TextOverflow.ELLIPSIS),
-                    ft.Text("Agotado" if agotado else formatear_precio(p["precio"]), size=px(15),
+                    ft.Text("Agotado" if agotado else precio_con_unidad(p), size=px(15),
                             weight=ft.FontWeight.W_600, color=COLOR_PELIGRO if agotado else COLOR_EXITO),
                 ],
             ),
@@ -240,8 +251,9 @@ class VistaInventario:
         productos = db.buscar_productos(
             texto=self.campo_buscar.value.strip(),
             categoria=None if categoria == "Todas" else categoria,
-            stock_menor_a=STOCK_BAJO if self.check_stock_bajo.value else None,
         )
+        if self.check_stock_bajo.value:
+            productos = [p for p in productos if es_stock_bajo(p)]
 
         if self.columna_ordenada is not None:
             productos = sorted(productos, key=CLAVES_ORDEN[self.columna_ordenada], reverse=not self.orden_ascendente)
@@ -274,12 +286,12 @@ class VistaInventario:
                                   " Usa el buscador para encontrar uno más rápido.")
 
     def fila_producto(self, p):
-        bajo = p["stock"] < STOCK_BAJO
         celdas = [
             ft.DataCell(ft.Text(p["nombre"], weight=ft.FontWeight.W_500)),
             ft.DataCell(ft.Text(p["categoria"], color=ft.Colors.ON_SURFACE_VARIANT)),
-            ft.DataCell(ft.Text(formatear_precio(p["precio"]))),
-            ft.DataCell(etiqueta(formatear_numero(p["stock"]), COLOR_PELIGRO if bajo else COLOR_EXITO)),
+            ft.DataCell(ft.Text(precio_con_unidad(p))),
+            ft.DataCell(etiqueta(formatear_cantidad(p["stock"], p["por_peso"]),
+                                 COLOR_PELIGRO if es_stock_bajo(p) else COLOR_EXITO)),
         ]
         if self.mostrar_codigo:
             celdas.append(ft.DataCell(ft.Text(p["codigo_barras"] or "—", color=ft.Colors.ON_SURFACE_VARIANT, size=px(13))))
@@ -291,8 +303,9 @@ class VistaInventario:
                     spacing=0,
                     controls=[
                         ft.IconButton(
-                            ft.Icons.ADD_SHOPPING_CART, tooltip="Agregar 1 al carrito", icon_color=COLOR_MARCA,
-                            on_click=lambda _, id_p=p["id"]: self.agregar_desde_tabla(id_p),
+                            ft.Icons.ADD_SHOPPING_CART, tooltip="Pesar y agregar al carrito" if p["por_peso"]
+                            else "Agregar 1 al carrito", icon_color=COLOR_MARCA,
+                            on_click=lambda _, id_p=p["id"]: self.page.run_task(self.agregar_desde_tabla, id_p),
                         ),
                         ft.IconButton(
                             ft.Icons.MOVE_TO_INBOX_OUTLINED, tooltip="Registrar entrada de mercancía",
@@ -320,8 +333,9 @@ class VistaInventario:
         hoy = date.today().strftime("%Y-%m-%d")
         ventas_hoy = db.resumen_ventas(hoy, hoy)["total"]
         self.valor_productos.value = formatear_numero(len(productos))
-        self.valor_bajo.value = formatear_numero(sum(1 for p in productos if p["stock"] < STOCK_BAJO))
-        self.valor_inventario.value = formatear_precio(sum(p["precio"] * p["stock"] for p in productos))
+        self.valor_bajo.value = formatear_numero(sum(1 for p in productos if es_stock_bajo(p)))
+        self.valor_inventario.value = formatear_precio(
+            sum(db.total_linea(p["precio"], p["stock"], p["por_peso"]) for p in productos))
         self.valor_hoy.value = formatear_precio(ventas_hoy)
 
     def ordenar_por_columna(self, e):
@@ -361,11 +375,30 @@ class VistaInventario:
                              (producto["codigo_barras"] or "") if producto else codigo, ft.Icons.QR_CODE)
         campo_categoria = campo("Categoría (ej: Lácteos)", producto["categoria"] if producto else "",
                                 ft.Icons.CATEGORY_OUTLINED)
-        campo_precio = campo("Precio ($)", formatear_numero(producto["precio"]) if producto else "",
+        por_peso = bool(producto and producto["por_peso"])
+        if producto:
+            stock_escrito = formatear_kilos(producto["stock"])[:-3] if por_peso else formatear_numero(producto["stock"])
+        campo_precio = campo("", formatear_numero(producto["precio"]) if producto else "",
                              ft.Icons.ATTACH_MONEY, expand=True)
-        campo_stock = campo("Stock (unidades)", formatear_numero(producto["stock"]) if producto else "",
-                            ft.Icons.LAYERS_OUTLINED, expand=True)
+        campo_stock = campo("", stock_escrito if producto else "", ft.Icons.LAYERS_OUTLINED, expand=True)
         campos = [campo_nombre, campo_codigo, campo_categoria, campo_precio, campo_stock]
+
+        def poner_etiquetas():
+            """Los productos por peso tienen el precio por kilo y el stock en kilos."""
+            campo_precio.label = "Precio por kilo ($)" if interruptor_peso.value else "Precio ($)"
+            campo_stock.label = "Stock (kilos, ej: 12,5)" if interruptor_peso.value else "Stock (unidades)"
+
+        def al_cambiar_peso(_):
+            poner_etiquetas()
+            self.page.update()
+
+        # Solo se elige al crear el producto: cambiarlo después cambiaría el
+        # sentido de las cantidades de sus ventas y entradas ya registradas
+        interruptor_peso = ft.Switch(
+            label="Se vende por peso", value=por_peso, disabled=producto is not None,
+            on_change=al_cambiar_peso,
+        )
+        poner_etiquetas()
         interruptor_rapido = ft.Switch(
             label="Botón rápido de venta (para productos sin código)",
             value=bool(producto["boton_rapido"]) if producto else False,
@@ -402,9 +435,13 @@ class VistaInventario:
             except ValueError:
                 return marcar_error(campo_precio, "Debe ser un número (ej: 1500, 1.500 o 1.500,50)")
             try:
-                stock = leer_entero(campo_stock.value.strip())
+                if interruptor_peso.value:
+                    stock = leer_kilos(campo_stock.value.strip())
+                else:
+                    stock = leer_entero(campo_stock.value.strip())
             except ValueError:
-                return marcar_error(campo_stock, "Debe ser un número entero")
+                return marcar_error(campo_stock, "Debe ser un número de kilos (ej: 12 o 12,5)" if interruptor_peso.value
+                                    else "Debe ser un número entero")
 
             error = db.validar_producto(precio, stock)
             if error:
@@ -441,7 +478,7 @@ class VistaInventario:
                                                         interruptor_rapido.value)
             else:
                 exito, mensaje = db.agregar_producto(nombre, categoria, precio, stock, codigo_leido,
-                                                     interruptor_rapido.value)
+                                                     interruptor_rapido.value, interruptor_peso.value)
             if not exito:
                 mostrar_mensaje(self.page, "Dato Inválido", mensaje, error=True)
                 return
@@ -488,8 +525,8 @@ class VistaInventario:
             title=ft.Text("Editar producto" if producto else "Nuevo producto"),
             content=ft.Column(
                 tight=True, spacing=14, width=px(460), horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-                controls=[campo_nombre, campo_codigo, campo_categoria, ft.Row([campo_precio, campo_stock]),
-                          interruptor_rapido],
+                controls=[campo_nombre, campo_codigo, campo_categoria, interruptor_peso,
+                          ft.Row([campo_precio, campo_stock]), interruptor_rapido],
             ),
             actions=acciones,
             actions_alignment=ft.MainAxisAlignment.END,
@@ -498,13 +535,24 @@ class VistaInventario:
     # --- CARRITO ---
 
     @manejar_errores_bd
-    def agregar_desde_tabla(self, id_producto):
+    async def agregar_desde_tabla(self, id_producto):
+        """Botón del carrito en la tabla y botones rápidos."""
         producto = db.obtener_producto(id_producto)
         if not producto:
             mostrar_mensaje(self.page, "Error", "El producto ya no existe.", error=True)
             self.cargar_productos()
             return
-        if self.sumar_al_carrito(producto, 1):
+        await self.agregar(producto)
+
+    async def agregar(self, producto):
+        """Suma 1 unidad al carrito o, si el producto se vende por peso, pregunta cuánto."""
+        if producto["por_peso"]:
+            cantidad = await pedir_peso(self.page, producto)
+            if cantidad is None:
+                return
+        else:
+            cantidad = 1
+        if self.sumar_al_carrito(producto, cantidad):
             self.mostrar_escaneo(producto)
 
     def sumar_al_carrito(self, producto, cantidad):
@@ -516,14 +564,16 @@ class VistaInventario:
         """Deja 'cantidad' unidades del producto en el carrito si hay stock. Retorna True si se pudo."""
         if cantidad > producto["stock"]:
             en_carrito = self.carrito.get(producto["id"], {}).get("cantidad", 0)
+            por_peso = producto["por_peso"]
             mostrar_mensaje(
                 self.page, "Stock Insuficiente",
-                f"Solo quedan {formatear_numero(producto['stock'])} unidades de '{producto['nombre']}' "
-                f"y ya hay {formatear_numero(en_carrito)} en el carrito.",
+                f"Solo quedan {formatear_cantidad(producto['stock'], por_peso)}{'' if por_peso else ' unidades'} "
+                f"de '{producto['nombre']}' y ya hay {formatear_cantidad(en_carrito, por_peso)} en el carrito.",
                 error=True,
             )
             return False
-        self.carrito[producto["id"]] = {"nombre": producto["nombre"], "precio": producto["precio"], "cantidad": cantidad}
+        self.carrito[producto["id"]] = {"nombre": producto["nombre"], "precio": producto["precio"], "cantidad": cantidad,
+                                        "por_peso": producto["por_peso"]}
         self.actualizar_carrito()
         return True
 
@@ -554,8 +604,19 @@ class VistaInventario:
         if nueva != self.carrito.get(id_producto, {}).get("cantidad"):
             self.cambiar_cantidad(id_producto, nueva)
 
+    @manejar_errores_bd
+    async def cambiar_peso(self, id_producto):
+        """Botón de la balanza en una línea por peso: vuelve a preguntar cuánto."""
+        producto = db.obtener_producto(id_producto)
+        if not producto:
+            self.refrescar_carrito()
+            return
+        gramos = await pedir_peso(self.page, producto, self.carrito[id_producto]["cantidad"])
+        if gramos is not None:
+            self.poner_cantidad(producto, gramos)
+
     def mostrar_escaneo(self, producto):
-        cantidad = formatear_numero(self.carrito[producto["id"]]["cantidad"])
+        cantidad = formatear_cantidad(self.carrito[producto["id"]]["cantidad"], producto["por_peso"])
         self.texto_escaneo.value = f"✓ {producto['nombre']} ({cantidad} en el carrito)"
         self.texto_escaneo.visible = True
         self.page.update()
@@ -571,8 +632,7 @@ class VistaInventario:
 
         producto = db.buscar_por_codigo(codigo)
         if producto:
-            if self.sumar_al_carrito(producto, 1):
-                self.mostrar_escaneo(producto)
+            await self.agregar(producto)
             await self.campo_escanear.focus()
             return
 
@@ -590,13 +650,16 @@ class VistaInventario:
             await self.campo_escanear.focus()
 
     def linea_carrito(self, id_producto, linea):
-        campo_cantidad = ft.TextField(
-            **CAMPO_HUNDIDO, value=formatear_numero(linea["cantidad"]), width=px(58), dense=True,
-            text_align=ft.TextAlign.CENTER,
-            content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
-        )
-        campo_cantidad.on_submit = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)
-        campo_cantidad.on_blur = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)
+        total = db.total_linea(linea["precio"], linea["cantidad"], linea["por_peso"])
+        if linea["por_peso"]:
+            # El peso no se cambia con + y −: el botón de la balanza vuelve a preguntarlo
+            detalle = (f"{formatear_cantidad(linea['cantidad'], True)} a {formatear_precio(linea['precio'])}/kg · "
+                       f"{formatear_precio(total)}")
+            botones = [ft.IconButton(ft.Icons.SCALE_OUTLINED, icon_size=px(18), tooltip="Cambiar el peso",
+                                     on_click=lambda _: self.page.run_task(self.cambiar_peso, id_producto))]
+        else:
+            detalle = f"{formatear_precio(linea['precio'])} c/u · {formatear_precio(total)}"
+            botones = self.botones_cantidad(id_producto, linea)
         return ft.Container(
             padding=ft.Padding.only(left=12, right=4, top=6, bottom=6),
             border_radius=12,
@@ -609,30 +672,49 @@ class VistaInventario:
                         controls=[
                             ft.Text(linea["nombre"], weight=ft.FontWeight.W_500, max_lines=1,
                                     overflow=ft.TextOverflow.ELLIPSIS),
-                            ft.Text(
-                                f"{formatear_precio(linea['precio'])} c/u · "
-                                f"{formatear_precio(linea['precio'] * linea['cantidad'])}",
-                                size=px(12), color=ft.Colors.ON_SURFACE_VARIANT,
-                            ),
+                            ft.Text(detalle, size=px(12), color=ft.Colors.ON_SURFACE_VARIANT),
                         ],
                     ),
-                    ft.IconButton(ft.Icons.REMOVE, icon_size=px(18), tooltip="Quitar 1",
-                                  on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] - 1)),
-                    campo_cantidad,
-                    ft.IconButton(ft.Icons.ADD, icon_size=px(18), tooltip="Agregar 1",
-                                  on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] + 1)),
+                    *botones,
                     ft.IconButton(ft.Icons.CLOSE, icon_size=px(18), tooltip="Quitar del carrito",
                                   on_click=lambda _: self.cambiar_cantidad(id_producto, 0)),
                 ],
             ),
         )
 
+    def botones_cantidad(self, id_producto, linea):
+        """Botones − y + y el campo de la cantidad, para los productos por unidades."""
+        campo_cantidad = ft.TextField(
+            **CAMPO_HUNDIDO, value=formatear_numero(linea["cantidad"]), width=px(58), dense=True,
+            text_align=ft.TextAlign.CENTER,
+            content_padding=ft.Padding.symmetric(horizontal=4, vertical=8),
+        )
+        campo_cantidad.on_submit = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)
+        campo_cantidad.on_blur = lambda _: self.escribir_cantidad(id_producto, campo_cantidad)
+        return [
+            ft.IconButton(ft.Icons.REMOVE, icon_size=px(18), tooltip="Quitar 1",
+                          on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] - 1)),
+            campo_cantidad,
+            ft.IconButton(ft.Icons.ADD, icon_size=px(18), tooltip="Agregar 1",
+                          on_click=lambda _: self.cambiar_cantidad(id_producto, linea["cantidad"] + 1)),
+        ]
+
+    def total_carrito(self):
+        return sum(db.total_linea(linea["precio"], linea["cantidad"], linea["por_peso"])
+                   for linea in self.carrito.values())
+
     def actualizar_carrito(self):
         self.lista_carrito.controls = [self.linea_carrito(i, linea) for i, linea in self.carrito.items()]
-        total = sum(linea["cantidad"] * linea["precio"] for linea in self.carrito.values())
-        unidades = sum(linea["cantidad"] for linea in self.carrito.values())
-        self.texto_total.value = formatear_precio(total)
-        self.texto_unidades.value = f"{formatear_numero(unidades)} unidad{'es' if unidades != 1 else ''}"
+        self.texto_total.value = formatear_precio(self.total_carrito())
+        # Ej: "3 unidades" o "3 unidades + 750 g"
+        unidades = sum(linea["cantidad"] for linea in self.carrito.values() if not linea["por_peso"])
+        gramos = sum(linea["cantidad"] for linea in self.carrito.values() if linea["por_peso"])
+        partes = []
+        if unidades or not gramos:
+            partes.append(f"{formatear_numero(unidades)} unidad{'es' if unidades != 1 else ''}")
+        if gramos:
+            partes.append(formatear_cantidad(gramos, True))
+        self.texto_unidades.value = " + ".join(partes)
         self.carrito_vacio.visible = not self.carrito
         self.boton_cobrar.disabled = not self.carrito
         if not self.carrito:
@@ -674,7 +756,7 @@ class VistaInventario:
             return
 
         cambios = self.refrescar_carrito()
-        total = sum(linea["cantidad"] * linea["precio"] for linea in self.carrito.values())
+        total = self.total_carrito()
         if cambios:
             if not self.carrito:
                 mostrar_mensaje(self.page, "Carrito Actualizado", "\n".join(cambios))

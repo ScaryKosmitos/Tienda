@@ -7,7 +7,7 @@ import os
 import textwrap
 
 import base_datos as db
-from formato import formatear_numero, formatear_precio
+from formato import formatear_cantidad, formatear_numero, formatear_precio
 
 # Encabezado y pie del recibo: cámbialos aquí para personalizarlo
 NOMBRE_TIENDA = "Tienda Doña Lilibeth"
@@ -46,8 +46,12 @@ def texto_recibo(recibo):
     for linea in recibo["lineas"]:
         nombre = linea["nombre_producto"] + (" (ANULADO)" if linea["anulada"] else "")
         lineas.extend(textwrap.wrap(nombre, ANCHO))
-        precio_unitario = linea["total"] / linea["cantidad"]
-        detalle = f"  {formatear_numero(linea['cantidad'])} x {formatear_precio(precio_unitario)}"
+        if linea["por_peso"]:
+            # El total de las ventas por peso va redondeado: basta con el peso
+            detalle = f"  {formatear_cantidad(linea['cantidad'], True)}"
+        else:
+            precio_unitario = linea["total"] / linea["cantidad"]
+            detalle = f"  {formatear_numero(linea['cantidad'])} x {formatear_precio(precio_unitario)}"
         lineas.append(_fila(detalle, formatear_precio(linea["total"])))
         if linea["anulada"]:
             devuelto += linea["total"]

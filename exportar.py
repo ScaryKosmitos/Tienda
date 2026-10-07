@@ -17,6 +17,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 import base_datos as db
+from componentes import STOCK_BAJO_GRAMOS
 from formato import describir_periodo
 from recibo import numero_recibo
 
@@ -30,6 +31,15 @@ CENTRADO = Alignment(horizontal="center")
 A_LA_DERECHA = Alignment(horizontal="right")
 
 FORMATO_UNIDADES = "#,##0"
+# Los productos por peso se guardan en gramos y en Excel se muestran en kilos
+FORMATO_KILOS = '#,##0.000 "kg"'
+
+
+def _celda_cantidad(hoja, cantidad, por_peso, fuente=None):
+    """Unidades, o kilos si el producto se vende por peso."""
+    if por_peso:
+        return _celda(hoja, cantidad / 1000, FORMATO_KILOS, fuente)
+    return _celda(hoja, cantidad, FORMATO_UNIDADES, fuente)
 FORMATO_FECHA = "yyyy-mm-dd hh:mm"
 FORMATO_PORCENTAJE = "0.0%"
 
@@ -115,7 +125,7 @@ def _hoja_ventas(hoja, desde, hasta, generado):
                    fuente=gris, alineacion=CENTRADO),
             _celda(hoja, datetime.fromisoformat(venta["fecha"]), FORMATO_FECHA, gris),
             _celda(hoja, venta["nombre_producto"], fuente=gris),
-            _celda(hoja, venta["cantidad"], FORMATO_UNIDADES, gris),
+            _celda_cantidad(hoja, venta["cantidad"], venta["por_peso"], gris),
             _celda(hoja, total, _formato_pesos(total), gris),
             _celda(hoja, "Anulada" if anulada else (venta["medio"] or "Fiado"), fuente=gris, alineacion=CENTRADO),
             _celda(hoja, venta["cliente"] or "", fuente=gris),
@@ -134,17 +144,17 @@ def _hoja_ventas(hoja, desde, hasta, generado):
 
 def _hoja_mas_vendidos(hoja, desde, hasta, generado):
     ranking = db.obtener_mas_vendidos(desde, hasta)
-    encabezados = ("#", "Producto", "Unidades Vendidas", "Total", "% de lo Vendido")
+    encabezados = ("#", "Producto", "Cantidad Vendida", "Total", "% de lo Vendido")
     _preparar_hoja(hoja, f"Más vendidos: {describir_periodo(desde, hasta)} (generado {generado})", encabezados, (
         6, _ancho([r[0] for r in ranking] + ["Producto"]), 19, 14, 17,
     ))
 
-    total_general = sum(total for _, _, total in ranking)
-    for puesto, (nombre, unidades, total) in enumerate(ranking, start=1):
+    total_general = sum(fila["total"] for fila in ranking)
+    for puesto, (nombre, unidades, total, por_peso) in enumerate(ranking, start=1):
         hoja.append([
             _celda(hoja, puesto, alineacion=CENTRADO),
             _celda(hoja, nombre),
-            _celda(hoja, unidades, FORMATO_UNIDADES),
+            _celda_cantidad(hoja, unidades, por_peso),
             _celda(hoja, total, _formato_pesos(total)),
             _celda(hoja, total / total_general if total_general else 0, FORMATO_PORCENTAJE),
         ])
@@ -162,7 +172,8 @@ def _hoja_inventario(hoja, generado, stock_bajo):
     valor_total = 0.0
     for p in productos:
         precio, stock = p["precio"], p["stock"]
-        valor = precio * stock
+        valor = db.total_linea(precio, stock, p["por_peso"])
+        bajo = stock < (STOCK_BAJO_GRAMOS if p["por_peso"] else stock_bajo)
         valor_total += valor
         hoja.append([
             _celda(hoja, p["id"], alineacion=CENTRADO),
@@ -171,7 +182,7 @@ def _hoja_inventario(hoja, generado, stock_bajo):
             _celda(hoja, p["nombre"]),
             _celda(hoja, p["categoria"]),
             _celda(hoja, precio, _formato_pesos(precio)),
-            _celda(hoja, stock, FORMATO_UNIDADES, ESTILO_STOCK_BAJO if stock < stock_bajo else None),
+            _celda_cantidad(hoja, stock, p["por_peso"], ESTILO_STOCK_BAJO if bajo else None),
             _celda(hoja, valor, _formato_pesos(valor)),
         ])
 

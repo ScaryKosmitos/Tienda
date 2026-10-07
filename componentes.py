@@ -13,6 +13,12 @@ from formato import formatear_numero
 
 # Los productos con menos unidades que esto se marcan en rojo
 STOCK_BAJO = 5
+# Lo mismo para los que se venden por peso (en gramos: 1 kilo)
+STOCK_BAJO_GRAMOS = 1000
+
+
+def es_stock_bajo(producto):
+    return producto["stock"] < (STOCK_BAJO_GRAMOS if producto["por_peso"] else STOCK_BAJO)
 
 # Errores que se muestran como "Error de Base de Datos" (archivo bloqueado, permisos, etc.)
 ERRORES_BD = (sqlite3.Error, OSError)

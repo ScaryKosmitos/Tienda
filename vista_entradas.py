@@ -1,5 +1,5 @@
 """
-Pantalla de entradas de mercancía: suma unidades al stock de un producto y
+Pantalla de entradas de mercancía: suma unidades (o kilos) al stock de un producto y
 muestra el historial de movimientos de stock.
 """
 import flet as ft
@@ -9,13 +9,15 @@ from componentes import (
     CAMPO_HUNDIDO, COLOR_EXITO, COLOR_PELIGRO, FILAS_POR_TANDA, PieMostrarMas, avisar, con_desplazamiento,
     crear_tabla, encabezado, etiqueta, icono_px, manejar_errores_bd, mostrar_mensaje, panel, px, texto_vacio,
 )
-from formato import clave_orden, formatear_cambio, formatear_numero, leer_entero
+from formato import clave_orden, formatear_cambio_cantidad, formatear_cantidad, leer_entero, leer_kilos
 
 
 class VistaEntradas:
     def __init__(self, page):
         self.page = page
         self.id_producto = None
+        # Si el producto elegido se vende por peso, la cantidad se escribe en kilos
+        self.por_peso = False
         # Productos del menú, (id, nombre): si no cambiaron, el menú no se vuelve a
         # armar (con miles de productos, armarlo tarda)
         self.productos_menu = None
@@ -37,7 +39,7 @@ class VistaEntradas:
         )
 
         self.tabla = crear_tabla(
-            [("Producto", False), ("Unidades", True), ("Fecha y hora", False), ("Motivo", False)],
+            [("Producto", False), ("Cantidad", True), ("Fecha y hora", False), ("Motivo", False)],
         )
         self.sin_movimientos = texto_vacio(ft.Icons.MOVE_TO_INBOX_OUTLINED, "Todavía no hay movimientos de stock")
         self.pie_tabla = PieMostrarMas(self.mostrar_mas_movimientos)
@@ -103,10 +105,13 @@ class VistaEntradas:
     def mostrar_producto(self):
         producto = db.obtener_producto(self.id_producto) if self.id_producto is not None else None
         hay_producto = producto is not None
+        self.por_peso = hay_producto and bool(producto["por_peso"])
+        self.campo_cantidad.label = "Kilos recibidos" if self.por_peso else "Unidades recibidas"
         self.campo_cantidad.disabled = not hay_producto
         self.boton_registrar.disabled = not hay_producto
         if hay_producto:
-            self.texto_stock.value = f"Stock actual de {producto['nombre']}: {formatear_numero(producto['stock'])}"
+            stock = formatear_cantidad(producto["stock"], producto["por_peso"])
+            self.texto_stock.value = f"Stock actual de {producto['nombre']}: {stock}"
         else:
             self.texto_stock.value = "Elige el producto que llegó"
 
@@ -137,10 +142,11 @@ class VistaEntradas:
 
     @staticmethod
     def fila_movimiento(movimiento):
-        _id, nombre, cantidad, fecha, motivo = movimiento
+        _id, nombre, cantidad, fecha, motivo, por_peso = movimiento
         return ft.DataRow(cells=[
             ft.DataCell(ft.Text(nombre, weight=ft.FontWeight.W_500)),
-            ft.DataCell(etiqueta(formatear_cambio(cantidad), COLOR_EXITO if cantidad > 0 else COLOR_PELIGRO)),
+            ft.DataCell(etiqueta(formatear_cambio_cantidad(cantidad, por_peso),
+                                 COLOR_EXITO if cantidad > 0 else COLOR_PELIGRO)),
             ft.DataCell(ft.Text(fecha, color=ft.Colors.ON_SURFACE_VARIANT, size=px(13))),
             ft.DataCell(ft.Text(motivo)),
         ])
@@ -149,11 +155,11 @@ class VistaEntradas:
     def registrar(self, _e):
         self.campo_cantidad.error_text = None
         try:
-            cantidad = leer_entero(self.campo_cantidad.value.strip())
+            cantidad = (leer_kilos if self.por_peso else leer_entero)(self.campo_cantidad.value.strip())
             if cantidad <= 0:
                 raise ValueError
         except ValueError:
-            self.campo_cantidad.error_text = "Debe ser un entero positivo"
+            self.campo_cantidad.error_text = "Kilos, ej: 12 o 12,5" if self.por_peso else "Debe ser un entero positivo"
             self.page.update()
             return
 

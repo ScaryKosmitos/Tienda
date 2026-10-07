@@ -14,6 +14,8 @@ _MILES_CON_COMA = re.compile(r"\d{1,3}(,\d{3})+(\.\d{1,2})?")
 _SIN_MILES = re.compile(r"\d+([.,]\d{1,2})?")
 # 1500 / 1.500 / -3           -> cantidades enteras (stock, unidades)
 _ENTERO = re.compile(r"-?(\d{1,3}(\.\d{3})+|\d+)")
+# 12 / 12,5 / 0,750 / 1.5     -> kilos, con hasta 3 decimales (gramos)
+_KILOS = re.compile(r"\d+([.,]\d{1,3})?")
 
 
 def leer_precio(texto):
@@ -44,6 +46,29 @@ def leer_entero(texto):
     return int(limpio.replace(".", ""))
 
 
+def leer_kilos(texto):
+    """
+    Convierte un peso en kilos escrito por el usuario ('12', '12,5', '0,750 kg')
+    en gramos enteros. Lanza ValueError si no es un peso válido.
+    """
+    limpio = texto.lower().replace("kg", "").replace(" ", "").strip()
+    if not _KILOS.fullmatch(limpio):
+        raise ValueError(f"Peso no válido: {texto!r}")
+    return round(float(limpio.replace(",", ".")) * 1000)
+
+
+def leer_gramos(texto):
+    """
+    Peso escrito en la venta: un entero son gramos ('750', '1.500') y un número
+    con coma son kilos ('1,5' = 1.500 g), como lo muestran las grameras.
+    Retorna gramos enteros. Lanza ValueError si no es un peso válido.
+    """
+    limpio = texto.lower().replace("g", "").replace(" ", "").strip()
+    if "," in limpio:
+        return leer_kilos(limpio)
+    return leer_entero(limpio)
+
+
 def formatear_numero(valor):
     """1500 -> '1.500'; 1500.5 -> '1.500,50' (sin decimales si es entero)."""
     if float(valor).is_integer():
@@ -62,6 +87,29 @@ def formatear_cambio(valor):
 def formatear_precio(valor):
     """1500 -> '$1.500'."""
     return f"${formatear_numero(valor)}"
+
+
+def formatear_kilos(gramos):
+    """12500 -> '12,5 kg'; 2000 -> '2 kg' (sin ceros de más)."""
+    texto = f"{gramos / 1000:.3f}".rstrip("0").rstrip(".").replace(".", ",")
+    return f"{texto} kg"
+
+
+def formatear_cantidad(cantidad, por_peso):
+    """
+    Cantidad de un producto: unidades ('3') o, si se vende por peso (la
+    cantidad está en gramos), '750 g' o '1,25 kg'.
+    """
+    if not por_peso:
+        return formatear_numero(cantidad)
+    if abs(cantidad) < 1000:
+        return f"{formatear_numero(cantidad)} g"
+    return formatear_kilos(cantidad)
+
+
+def formatear_cambio_cantidad(cantidad, por_peso):
+    """Como formatear_cambio, para unidades o gramos: '+3', '-750 g', '+12,5 kg'."""
+    return ("+" if cantidad > 0 else "") + formatear_cantidad(cantidad, por_peso)
 
 
 def sin_tildes(texto):

@@ -5,7 +5,10 @@ import sys
 import sqlite3
 from datetime import datetime
 
-from formato import clave_orden, formatear_cambio, formatear_numero, formatear_precio, sin_tildes
+from formato import (
+    clave_orden, formatear_cambio_cantidad, formatear_cantidad, formatear_numero, formatear_precio,
+    sin_tildes,
+)
 
 # Límites de unidades y de precio por producto: evitan números tan grandes que
 # SQLite no puede guardarlos o que desarman el recibo (y que casi siempre son un
@@ -21,6 +24,9 @@ MEDIOS = (EFECTIVO, NEQUI)
 # El cambio de una venta no puede pasar de esto. Si pasa, casi seguro se
 # escaneó un código de barras en el campo del pago (ej: 7702004003501)
 CAMBIO_MAXIMO = 1_000_000
+
+# Las ventas por peso se redondean a esta cantidad de pesos (la moneda más pequeña)
+REDONDEO_PESO = 50
 
 # Códigos de barras: números (EAN-13, UPC...) o letras, números y guiones (Code 128)
 _CODIGO_VALIDO = re.compile(r"[0-9A-Za-z-]{1,32}")
@@ -82,6 +88,10 @@ def inicializar_db():
             # (los que no tienen código de barras, como el pan o los huevos)
             if "boton_rapido" not in columnas_productos:
                 cursor.execute("ALTER TABLE productos ADD COLUMN boton_rapido INTEGER NOT NULL DEFAULT 0")
+            # Productos que se venden por peso (el pescado): su precio es por kilo y
+            # su stock y las cantidades de sus ventas y entradas están en gramos
+            if "por_peso" not in columnas_productos:
+                cursor.execute("ALTER TABLE productos ADD COLUMN por_peso INTEGER NOT NULL DEFAULT 0")
 
             # Un recibo agrupa las líneas de una misma venta y guarda con cuánto pagó el cliente
             cursor.execute("""
@@ -225,6 +235,15 @@ def _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, motivo
         VALUES (?, ?, ?, ?, ?)
     """, (id_producto, nombre_producto, cantidad, fecha_actual, motivo))
 
+def total_linea(precio, cantidad, por_peso):
+    """
+    Lo que cuesta 'cantidad' de un producto. Si se vende por peso, el precio es
+    por kilo y la cantidad está en gramos, y el total se redondea a $50.
+    """
+    if not por_peso:
+        return precio * cantidad
+    return round(precio * cantidad / 1000 / REDONDEO_PESO) * REDONDEO_PESO
+
 def validar_producto(precio, stock):
     """Retorna un mensaje de error si el precio o el stock no son válidos, o None si están bien."""
     if not math.isfinite(precio) or precio <= 0:
@@ -313,11 +332,13 @@ def categoria_es_nueva(categoria):
     """True si no hay ningún producto con esa categoría (sin importar mayúsculas ni tildes)."""
     return all(sin_tildes(c) != sin_tildes(categoria) for c in obtener_categorias())
 
-def agregar_producto(nombre, categoria, precio, stock, codigo=None, boton_rapido=False):
+def agregar_producto(nombre, categoria, precio, stock, codigo=None, boton_rapido=False, por_peso=False):
     """Retorna (exito: bool, mensaje: str). Se permite registrar un producto
     con stock 0 (por ejemplo, uno que todavía no ha llegado). 'codigo' es el
     código de barras, o None si el producto no tiene. 'boton_rapido' lo muestra
-    como botón grande en la pantalla de venta."""
+    como botón grande en la pantalla de venta. Si 'por_peso', el precio es por
+    kilo y el stock está en gramos; no se puede cambiar después, porque
+    cambiaría el sentido de las cantidades ya registradas."""
     error = validar_producto(precio, stock)
     if error:
         return False, error
@@ -337,9 +358,9 @@ def agregar_producto(nombre, categoria, precio, stock, codigo=None, boton_rapido
                 return False, _mensaje_repetido(existente)
             categoria = _categoria_existente(cursor, categoria)
             cursor.execute("""
-                INSERT INTO productos (nombre, categoria, precio, stock, codigo_barras, boton_rapido)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (nombre, categoria, precio, stock, codigo, int(boton_rapido)))
+                INSERT INTO productos (nombre, categoria, precio, stock, codigo_barras, boton_rapido, por_peso)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (nombre, categoria, precio, stock, codigo, int(boton_rapido), int(por_peso)))
             if stock > 0:
                 _registrar_movimiento(cursor, cursor.lastrowid, nombre, stock, "Stock inicial")
         return True, "Producto agregado."
@@ -421,7 +442,7 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=No
     try:
         with conexion:
             cursor = conexion.cursor()
-            cursor.execute("SELECT nombre, stock FROM productos WHERE id = ?", (id_producto,))
+            cursor.execute("SELECT nombre, stock, por_peso FROM productos WHERE id = ?", (id_producto,))
             res = cursor.fetchone()
             if not res:
                 return False, "Producto no encontrado."
@@ -446,7 +467,8 @@ def actualizar_producto(id_producto, nombre, categoria, precio, stock, codigo=No
                 _registrar_movimiento(cursor, id_producto, nombre, diferencia, "Ajuste manual")
 
         if diferencia:
-            return True, f"Producto actualizado. Se registró un ajuste de stock de {formatear_cambio(diferencia)}."
+            return True, ("Producto actualizado. Se registró un ajuste de stock de "
+                          f"{formatear_cambio_cantidad(diferencia, res['por_peso'])}.")
         return True, "Producto actualizado."
     finally:
         conexion.close()
@@ -480,7 +502,10 @@ class _VentaRechazada(Exception):
 
 
 def obtener_producto(id_producto):
-    """Retorna el producto (columnas id, nombre, categoria, precio, stock, codigo_barras, boton_rapido) o None si no existe."""
+    """
+    Retorna el producto (columnas id, nombre, categoria, precio, stock,
+    codigo_barras, boton_rapido y por_peso) o None si no existe.
+    """
     conexion = conectar()
     try:
         cursor = conexion.cursor()
@@ -505,7 +530,7 @@ def validar_pago(pago, total):
 def registrar_venta_carrito(items, pago=None, cliente_id=None, medio=EFECTIVO):
     """
     Registra la venta de varios productos a la vez. 'items' es una lista de
-    (id_producto, cantidad). Verifica el stock de cada uno, lo descuenta y
+    (id_producto, cantidad); en los productos por peso, la cantidad son gramos. Verifica el stock de cada uno, lo descuenta y
     registra una línea por producto, todas con la misma fecha y hora y el
     mismo recibo. 'pago' es el dinero que entregó el cliente (None = pago exacto).
     Si se da 'cliente_id', la venta completa se le fía a ese cliente (pago = 0).
@@ -541,21 +566,20 @@ def registrar_venta_carrito(items, pago=None, cliente_id=None, medio=EFECTIVO):
             id_recibo = cursor.lastrowid
 
             for id_producto, cantidad in items:
-                cursor.execute("SELECT nombre, precio, stock FROM productos WHERE id = ?", (id_producto,))
+                cursor.execute("SELECT nombre, precio, stock, por_peso FROM productos WHERE id = ?", (id_producto,))
                 res = cursor.fetchone()
                 if not res:
                     raise _VentaRechazada(f"Un producto del carrito (ID {id_producto}) ya no existe.")
 
-                nombre_producto, precio_unitario, stock_actual = res
+                nombre_producto, precio_unitario, stock_actual, por_peso = res
                 if stock_actual < cantidad:
-                    raise _VentaRechazada(
-                        f"Stock insuficiente de '{nombre_producto}'. Solo quedan {formatear_numero(stock_actual)} unidades."
-                    )
+                    quedan = formatear_cantidad(stock_actual, por_peso) + ("" if por_peso else " unidades")
+                    raise _VentaRechazada(f"Stock insuficiente de '{nombre_producto}'. Solo quedan {quedan}.")
 
                 cursor.execute(
                     "UPDATE productos SET stock = ? WHERE id = ?", (stock_actual - cantidad, id_producto)
                 )
-                total = cantidad * precio_unitario
+                total = total_linea(precio_unitario, cantidad, por_peso)
                 total_venta += total
                 cursor.execute("""
                     INSERT INTO ventas (producto_id, nombre_producto, cantidad, total, fecha, recibo_id)
@@ -591,7 +615,7 @@ def obtener_recibo(id_recibo):
     """
     Retorna un diccionario con los datos del recibo (id, fecha, total, pago,
     medio y cliente, que es el nombre del cliente si la venta fue fiada o None) y sus
-    'lineas' (nombre_producto, cantidad, total, anulada), o None si no existe.
+    'lineas' (nombre_producto, cantidad, total, anulada, por_peso), o None si no existe.
     """
     conexion = conectar()
     try:
@@ -605,7 +629,8 @@ def obtener_recibo(id_recibo):
         if not recibo:
             return None
         cursor.execute(
-            "SELECT nombre_producto, cantidad, total, anulada FROM ventas WHERE recibo_id = ? ORDER BY id",
+            "SELECT v.nombre_producto, v.cantidad, v.total, v.anulada, COALESCE(p.por_peso, 0) AS por_peso "
+            "FROM ventas v LEFT JOIN productos p ON p.id = v.producto_id WHERE v.recibo_id = ? ORDER BY v.id",
             (id_recibo,)
         )
         return {**dict(recibo), "lineas": cursor.fetchall()}
@@ -635,7 +660,7 @@ def obtener_ventas(desde=None, hasta=None, limite=None, despues_de=None):
     columnas id, producto_id, nombre_producto, cantidad, total, fecha, anulada,
     recibo_id (None en las ventas hechas antes de que existieran los recibos),
     cliente (nombre del cliente si la venta fue fiada, o None) y medio
-    (EFECTIVO o NEQUI; None si fue fiada).
+    (EFECTIVO o NEQUI; None si fue fiada) y por_peso (la cantidad son gramos).
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     'limite' retorna solo las más recientes (None = todas). 'despues_de' es la
     última venta ya mostrada (para el botón "Mostrar más"): se retornan las
@@ -649,10 +674,12 @@ def obtener_ventas(desde=None, hasta=None, limite=None, despues_de=None):
     consulta = """
         SELECT v.id, v.producto_id, v.nombre_producto, v.cantidad, v.total, v.fecha, v.anulada, v.recibo_id,
                c.nombre AS cliente,
-               CASE WHEN r.cliente_id IS NOT NULL THEN NULL ELSE COALESCE(r.medio, 'Efectivo') END AS medio
+               CASE WHEN r.cliente_id IS NOT NULL THEN NULL ELSE COALESCE(r.medio, 'Efectivo') END AS medio,
+               COALESCE(p.por_peso, 0) AS por_peso
         FROM ventas v
         LEFT JOIN recibos r ON r.id = v.recibo_id
         LEFT JOIN clientes c ON c.id = r.cliente_id
+        LEFT JOIN productos p ON p.id = v.producto_id
     """
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
@@ -702,8 +729,10 @@ def resumen_ventas(desde=None, hasta=None):
 
 def obtener_mas_vendidos(desde=None, hasta=None):
     """
-    Ranking de productos por unidades vendidas (sin contar ventas anuladas),
-    con las columnas nombre, unidades y total, de más a menos vendido.
+    Ranking de productos por plata vendida (sin contar ventas anuladas: así se
+    comparan los que se venden por unidades con los que se venden por peso),
+    con las columnas nombre, unidades, total y por_peso (las unidades son
+    gramos), de más a menos vendido.
     'desde' y 'hasta' son fechas 'AAAA-MM-DD' opcionales (ambas incluidas).
     """
     condiciones, parametros = _filtro_fechas(desde, hasta, "v.fecha")
@@ -713,11 +742,11 @@ def obtener_mas_vendidos(desde=None, hasta=None):
     # renombrarlo se sume en la misma fila
     consulta = f"""
         SELECT COALESCE(p.nombre, MAX(v.nombre_producto)) AS nombre,
-               SUM(v.cantidad) AS unidades, SUM(v.total) AS total
+               SUM(v.cantidad) AS unidades, SUM(v.total) AS total, COALESCE(p.por_peso, 0) AS por_peso
         FROM ventas v LEFT JOIN productos p ON p.id = v.producto_id
         WHERE {" AND ".join(condiciones)}
         GROUP BY v.producto_id
-        ORDER BY unidades DESC, total DESC
+        ORDER BY total DESC
     """
 
     conexion = conectar()
@@ -778,7 +807,7 @@ def anular_ventas(ids_venta):
         cantidad_lineas = len(ids_venta)
         return True, (
             f"Se anularon {cantidad_lineas} línea(s) de venta por {formatear_precio(total_devuelto)}. "
-            "Las unidades volvieron al stock."
+            "Lo vendido volvió al stock."
         )
     except _VentaRechazada as rechazo:
         return False, str(rechazo)
@@ -799,12 +828,12 @@ def registrar_entrada(id_producto, cantidad):
     try:
         with conexion:
             cursor = conexion.cursor()
-            cursor.execute("SELECT nombre, stock FROM productos WHERE id = ?", (id_producto,))
+            cursor.execute("SELECT nombre, stock, por_peso FROM productos WHERE id = ?", (id_producto,))
             res = cursor.fetchone()
             if not res:
                 return False, "Producto no encontrado."
 
-            nombre_producto, stock_actual = res
+            nombre_producto, stock_actual, por_peso = res
             if stock_actual + cantidad > STOCK_MAXIMO:
                 return False, (
                     f"Con esa entrada, '{nombre_producto}' pasaría de "
@@ -814,8 +843,8 @@ def registrar_entrada(id_producto, cantidad):
             _registrar_movimiento(cursor, id_producto, nombre_producto, cantidad, "Entrada")
 
         return True, (
-            f"Entrada registrada: {formatear_cambio(cantidad)} de '{nombre_producto}'. "
-            f"Stock nuevo: {formatear_numero(stock_actual + cantidad)}."
+            f"Entrada registrada: {formatear_cambio_cantidad(cantidad, por_peso)} de '{nombre_producto}'. "
+            f"Stock nuevo: {formatear_cantidad(stock_actual + cantidad, por_peso)}."
         )
     finally:
         conexion.close()
@@ -831,16 +860,19 @@ def contar_entradas():
 def obtener_entradas(limite=None, antes_de_id=None):
     """
     Retorna los movimientos de stock (entradas, stock inicial, ajustes
-    manuales y anulaciones de ventas) como (id, nombre_producto, cantidad, fecha, motivo), del más
+    manuales y anulaciones de ventas) como (id, nombre_producto, cantidad, fecha, motivo, por_peso), del más
     reciente al más antiguo. 'limite' retorna solo los más recientes (None = todos).
     'antes_de_id' retorna solo los anteriores a ese movimiento (para el botón "Mostrar más").
     """
-    consulta = "SELECT id, nombre_producto, cantidad, fecha, motivo FROM entradas"
+    consulta = """
+        SELECT e.id, e.nombre_producto, e.cantidad, e.fecha, e.motivo, COALESCE(p.por_peso, 0) AS por_peso
+        FROM entradas e LEFT JOIN productos p ON p.id = e.producto_id
+    """
     parametros = []
     if antes_de_id is not None:
-        consulta += " WHERE id < ?"
+        consulta += " WHERE e.id < ?"
         parametros.append(antes_de_id)
-    consulta += " ORDER BY id DESC"
+    consulta += " ORDER BY e.id DESC"
     if limite is not None:
         consulta += " LIMIT ?"
         parametros.append(limite)

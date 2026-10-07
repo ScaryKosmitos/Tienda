@@ -17,7 +17,7 @@ from componentes import (
 )
 from dialogo_clave import pedir_clave
 from dialogo_recibo import mostrar_recibo
-from formato import describir_periodo, formatear_numero, formatear_precio
+from formato import describir_periodo, formatear_cantidad, formatear_numero, formatear_precio
 from recibo import numero_recibo
 
 
@@ -180,7 +180,7 @@ class VistaVentas:
 
     def crear_pestana_ranking(self):
         self.tabla_ranking = crear_tabla(
-            [("#", True), ("Producto", False), ("Unidades vendidas", True), ("Total", True),
+            [("#", True), ("Producto", False), ("Cantidad vendida", True), ("Total", True),
              ("% de lo vendido", True)],
         )
         self.sin_ranking = texto_vacio(ft.Icons.EMOJI_EVENTS_OUTLINED, "No hay ventas en este período")
@@ -306,7 +306,7 @@ class VistaVentas:
             cells=[
                 ft.DataCell(ft.Text(numero_recibo(venta["recibo_id"]) if venta["recibo_id"] else "—", color=gris)),
                 ft.DataCell(ft.Text(venta["nombre_producto"], weight=ft.FontWeight.W_500, color=gris)),
-                ft.DataCell(ft.Text(formatear_numero(venta["cantidad"]), color=gris)),
+                ft.DataCell(ft.Text(formatear_cantidad(venta["cantidad"], venta["por_peso"]), color=gris)),
                 ft.DataCell(ft.Text(formatear_precio(venta["total"]), color=gris)),
                 ft.DataCell(ft.Text(venta["fecha"], color=gris or ft.Colors.ON_SURFACE_VARIANT, size=px(13))),
                 ft.DataCell(self.etiqueta_estado(venta)),
@@ -360,7 +360,7 @@ class VistaVentas:
             primero = ranking[0]
             self.texto_ranking.value = (
                 f"{len(ranking)} producto(s) vendidos ({periodo})  ·  "
-                f"Más vendido: {primero['nombre']} ({formatear_numero(primero['unidades'])} unidades)"
+                f"Más vendido: {primero['nombre']} ({formatear_precio(primero['total'])})"
             )
         else:
             self.texto_ranking.value = ""
@@ -382,7 +382,7 @@ class VistaVentas:
         return ft.DataRow(cells=[
             ft.DataCell(ft.Icon(ft.Icons.EMOJI_EVENTS, color=medalla, size=px(20)) if medalla else ft.Text(str(puesto))),
             ft.DataCell(ft.Text(fila["nombre"], weight=ft.FontWeight.W_500)),
-            ft.DataCell(ft.Text(formatear_numero(fila["unidades"]))),
+            ft.DataCell(ft.Text(formatear_cantidad(fila["unidades"], fila["por_peso"]))),
             ft.DataCell(ft.Text(formatear_precio(fila["total"]))),
             ft.DataCell(ft.Text(porcentaje)),
         ])
@@ -405,7 +405,7 @@ class VistaVentas:
             return
         if not await preguntar(
             self.page, "Anular ventas",
-            f"¿Anular {len(self.seleccion)} línea(s) de venta? Las unidades volverán al stock "
+            f"¿Anular {len(self.seleccion)} línea(s) de venta? Lo vendido volverá al stock "
             "y, si la venta fue fiada, se le descontará al cliente de lo que debe.",
             si="Anular", peligro=True,
         ) or not await pedir_clave(self.page, "Anular ventas necesita la clave."):
